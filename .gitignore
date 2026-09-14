@@ -1,0 +1,20 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Game files are copyrighted — supply your own.
+roms/
+*.z1
+*.z3
+*.z5
+*.z8
+*.zblorb
+
+# Run output
+traces/
+.env
+.pytest_cache/

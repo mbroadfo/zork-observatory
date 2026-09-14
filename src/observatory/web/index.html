@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zork Observatory</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>&#127756;</text></svg>">
+<link rel="stylesheet" href="/static/style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.30.2/cytoscape.min.js"></script>
+</head>
+<body>
+
+<header>
+  <div class="brand">Zork <span>/</span> Observatory</div>
+
+  <div class="controls">
+    <select id="engine" title="Game engine">
+      <option value="mock">mock world</option>
+      <option value="jericho">jericho</option>
+    </select>
+    <input type="text" id="rom" placeholder="roms/zork1.z5" size="16" style="display:none">
+    <select id="agent" title="Who plays">
+      <option value="random">random</option>
+      <option value="scripted">scripted</option>
+      <option value="claude">claude</option>
+      <option value="human">human</option>
+    </select>
+    <select id="model" title="Model" style="display:none">
+      <option value="claude-opus-5">opus 5</option>
+      <option value="claude-sonnet-5">sonnet 5</option>
+      <option value="claude-haiku-4-5">haiku 4.5</option>
+    </select>
+    <select id="effort" title="Thinking effort" style="display:none">
+      <option value="low">low</option>
+      <option value="medium" selected>medium</option>
+      <option value="high">high</option>
+    </select>
+    <input type="number" id="turns" value="60" min="1" max="2000" size="4" title="Turn budget" style="width:66px">
+    <button id="new-run" class="primary">New run</button>
+  </div>
+
+  <div class="controls">
+    <button id="run" disabled>▶ Run</button>
+    <button id="pause" disabled>❚❚ Pause</button>
+    <button id="step" disabled>↷ Step</button>
+    <button id="mark" disabled title="Freeze the world here so you can come back">⚑ Mark</button>
+  </div>
+
+  <div class="spacer"></div>
+
+  <div class="readouts">
+    <div class="readout">
+      <span class="label">Score</span>
+      <span class="value accent" id="r-score">0</span>
+      <div class="gauge"><div id="r-gauge"></div></div>
+    </div>
+    <div class="readout"><span class="label">Turn</span><span class="value" id="r-turn">0</span></div>
+    <div class="readout"><span class="label">Rooms</span><span class="value cyan" id="r-rooms">0</span></div>
+    <div class="readout"><span class="label">Cost</span><span class="value" id="r-cost">$0.00</span></div>
+    <div class="readout"><span class="label">Link</span><span class="value" id="r-link">·</span></div>
+  </div>
+</header>
+
+<main>
+  <!-- transcript --------------------------------------------------- -->
+  <section class="pane">
+    <div class="pane-head">
+      Transcript
+      <span class="count" id="t-count"></span>
+      <span class="spacer"></span>
+      <button id="toggle-thoughts">hide reasoning</button>
+    </div>
+    <div class="pane-body" id="transcript"></div>
+    <div id="input-row">
+      <input type="text" id="human-cmd" placeholder="&gt; open mailbox" autocomplete="off">
+      <button id="send">Send</button>
+    </div>
+  </section>
+
+  <!-- map ----------------------------------------------------------- -->
+  <section class="pane">
+    <div class="pane-head">
+      Map <span class="count" id="m-count">discovered by exploration</span>
+      <span class="spacer"></span>
+      <button id="fit">fit</button>
+    </div>
+    <div id="map"></div>
+    <div class="legend">
+      <span><i class="cur"></i>current</span>
+      <span><i class="seen"></i>visited</span>
+      <span><i class="dark"></i>dark</span>
+      <span><i class="death"></i>death here</span>
+      <span><i class="blk"></i>blocked exit</span>
+      <span><i class="vert"></i>up / down</span>
+    </div>
+  </section>
+
+  <!-- world state ---------------------------------------------------- -->
+  <section class="pane">
+    <div class="pane-head">World state <span class="count">ground truth</span></div>
+    <div class="pane-body">
+      <div class="section">
+        <h3>Location</h3>
+        <div class="kv"><span class="k">room</span><span class="v" id="s-room">—</span></div>
+        <div class="kv"><span class="k">state hash</span><span class="v" id="s-hash">—</span></div>
+        <div class="kv"><span class="k">objects</span><span class="v" id="s-objects">0</span></div>
+      </div>
+
+      <div class="section">
+        <h3>Carrying</h3>
+        <ul class="plain" id="s-inventory"><li class="empty">empty-handed</li></ul>
+      </div>
+
+      <div class="section">
+        <h3>This turn changed</h3>
+        <div class="delta" id="s-delta"><div class="hint">nothing yet</div></div>
+      </div>
+
+      <div class="section">
+        <h3>Checkpoints</h3>
+        <div class="chips" id="s-checkpoints"><span class="hint">none — press ⚑ Mark</span></div>
+      </div>
+
+      <div class="section">
+        <h3>Object tree</h3>
+        <div class="tree" id="s-tree"><div class="hint">no session</div></div>
+      </div>
+
+      <div class="section">
+        <h3>Traces</h3>
+        <div class="chips" id="s-traces"><span class="hint">none recorded</span></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div id="toast"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

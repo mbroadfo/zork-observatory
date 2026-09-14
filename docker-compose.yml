@@ -1,0 +1,17 @@
+services:
+  observatory:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      # Supply your own game files here. Nothing copyrighted ships with this repo.
+      - ./roms:/app/roms:ro
+      - ./traces:/app/traces
+      # Live-edit the source without rebuilding.
+      - ./src:/app/src
+    environment:
+      # Read from the host shell; leave unset to run the free agents only.
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    command: ["observatory", "serve", "--host", "0.0.0.0", "--port", "8000", "--reload"]
