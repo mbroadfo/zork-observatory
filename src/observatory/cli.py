@@ -74,6 +74,11 @@ async def _play(args: argparse.Namespace) -> int:
             print(f"=== {p['reason']} — score {p['final_score']}/{p['max_score']} "
                   f"in {p['turns']} turns, {p.get('deaths', 0)} death(s) ==={censored}")
             print(f"    map: {p['map']}")
+            c = p["coverage"]
+            print(f"    explored: {c['rooms_seen']}/{c['rooms_total']} rooms ({c['rooms_pct']}%) · "
+                  f"{c['objects_seen']}/{c['objects_total']} objects seen ({c['objects_pct']}%) · "
+                  f"{c['objects_held']} ever held, {c['stowed']} stowed · "
+                  f"score {c['score']}/{c['max_score']} ({c['score_pct']}%)")
             q = p["quality"]
             print(f"    turns: {q['wasted_pct']}% wasted, {q['futile_pct']}% futile "
                   f"(already tried and already failed in that same room) · "

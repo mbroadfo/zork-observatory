@@ -554,6 +554,33 @@ function renderDiscoveries(manifest) {
     .join("");
 }
 
+function renderCoverage(c) {
+  if (!c) return;
+  const rows = [
+    ["rooms explored", c.rooms_seen, c.rooms_total, c.rooms_pct, ""],
+    ["objects seen", c.objects_seen, c.objects_total, c.objects_pct, ""],
+    ["score", c.score, c.max_score, c.score_pct, "score"],
+  ];
+  $("cov-rows").innerHTML =
+    rows
+      .map(
+        ([label, seen, total, pct, cls]) => `
+      <div class="cov-row">
+        <div class="cov-top">
+          <span class="cov-label">${label}</span>
+          <span class="cov-val"><b>${seen}</b> / ${total}<span class="pct">${pct}%</span></span>
+        </div>
+        <div class="cov-track"><div class="cov-fill ${cls}" style="width:${Math.min(pct, 100)}%"></div></div>
+      </div>`
+      )
+      .join("") +
+    `<div class="kv"><span class="k">objects ever held</span><span class="v">${c.objects_held}</span></div>` +
+    `<div class="kv"><span class="k">stowed in containers</span><span class="v">${c.stowed}</span></div>`;
+
+  // The header reads better with the denominator once we know it.
+  $("r-rooms").textContent = c.rooms_total ? `${c.rooms_seen}/${c.rooms_total}` : c.rooms_seen;
+}
+
 const QUALITY_ORDER = [
   ["progress", "productive"],
   ["blocked", "no way through"],
@@ -684,6 +711,7 @@ function handle(event) {
     case "state.snapshot":
       state.current = p.room_id;
       renderSnapshot(p);
+      renderCoverage(p.coverage);
       if (state.rooms.has(p.room_id)) {
         cy.$(".room").removeClass("current");
         cy.$id(p.room_id).addClass("current");
@@ -789,6 +817,7 @@ function resetView() {
   $("q-key").innerHTML = "";
   $("q-distinct").textContent = "0";
   $("q-deadends").textContent = "0";
+  $("cov-rows").innerHTML = "";
   $("s-containers").innerHTML = '<li class="empty">none seen</li>';
   $("c-count").textContent = "";
   $("inv-count").textContent = "";
@@ -880,6 +909,7 @@ function applySummary(s) {
   if ((s.memory || []).length >= state.memory.length) state.memory = s.memory || [];
   renderMemory(state.memory);
   renderQuality(s.quality);
+  renderCoverage(s.coverage);
   $("r-deaths").textContent = s.deaths || 0;
   if (s.usage && s.usage.cost_usd) {
     costTotal = s.usage.cost_usd;

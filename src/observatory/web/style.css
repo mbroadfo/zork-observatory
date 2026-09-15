@@ -358,6 +358,19 @@ ul.containers .arrow { color: var(--dimmer); }
   display: inline-block; width: 8px; height: 8px; border-radius: 2px;
   margin-right: 5px; vertical-align: -1px;
 }
+.cov-row { margin-bottom: 7px; }
+.cov-row .cov-top {
+  display: flex; justify-content: space-between; gap: 8px;
+  font-size: 11.5px; margin-bottom: 3px;
+}
+.cov-row .cov-label { color: var(--dim); }
+.cov-row .cov-val { font-variant-numeric: tabular-nums; }
+.cov-row .cov-val b { color: var(--text); }
+.cov-row .cov-val .pct { color: var(--dimmer); margin-left: 5px; }
+.cov-track { height: 5px; background: var(--line); border-radius: 3px; overflow: hidden; }
+.cov-fill { height: 100%; width: 0; transition: width .4s ease; background: var(--cyan); }
+.cov-fill.score { background: var(--amber); }
+
 .headline { font-size: 12px; }
 .headline b { font-size: 15px; font-variant-numeric: tabular-nums; }
 .headline .bad { color: var(--red); }

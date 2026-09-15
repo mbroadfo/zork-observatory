@@ -22,7 +22,8 @@ from .agents.base import Agent, TurnContext
 from .engine.base import GameEngine, Observation, WorldState  # noqa: F401  (Observation is constructed here)
 from .events import EventBus
 from .trace import TraceWriter
-from .world.discovery import DiscoveryLedger
+from .world.coverage import Coverage
+from .world.discovery import DiscoveryLedger, Turn as DiscoveryTurn
 from .world.graph import MapGraph
 from .world.outcomes import OutcomeTally
 from .world.objects import build_tree, diff_objects, name_for
@@ -100,6 +101,7 @@ class Session:
         self.map = MapGraph()
         self.ledger = DiscoveryLedger()
         self.outcomes = OutcomeTally()
+        self.coverage = Coverage()
         self.transcript: list[tuple[str, str]] = []
         self.checkpoints: dict[str, Checkpoint] = {}
 
@@ -211,6 +213,7 @@ class Session:
             dark=state.dark,
             object_count=len(state.objects),
             tree=build_tree(state.objects),
+            coverage=self.coverage.summary(),
         )
 
         if any(delta.values()):
@@ -220,6 +223,14 @@ class Session:
                 stats=self.map.stats(),
                 **{k: v for k, v in delta.items() if v},
             )
+
+        # Ground covered. Reuses the ledger's notion of "what could the player
+        # see from here" so the two panels never disagree about visibility.
+        probe = DiscoveryTurn(
+            turn=self.turn, command=command, obs=obs, state=state,
+            prev_state=self._last_state, visited_rooms=set(), commands_seen=set(),
+        )
+        self.coverage.observe(state, probe.visible_objects(), probe.player_object())
 
         # What the agent has worked out about the shape of the world, judged by
         # what it did rather than what it claimed.
@@ -493,6 +504,7 @@ class Session:
             map=self.map.stats(),
             discoveries=self.ledger.summary(),
             quality=self.outcomes.summary(),
+            coverage=self.coverage.summary(),
             usage=self.agent.usage(),
         )
         await self.agent.on_end(reason)
@@ -578,6 +590,7 @@ class Session:
             "map": self.map.stats(),
             "discoveries": self.ledger.manifest(),
             "quality": self.outcomes.summary(),
+            "coverage": self.coverage.summary(),
             "usage": self.agent.usage(),
             "checkpoints": [
                 {

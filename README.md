@@ -148,6 +148,34 @@ as watching something meet the form for the first time. Getting closer to that
 requires perturbing the world too: "an open field west of a white house" is a
 fingerprint no amount of prompt austerity can hide. See the mutator below.
 
+### Coverage, with real denominators
+
+"Twelve rooms" is an achievement in one game and a rounding error in another.
+The object table knows which, so the denominators come from ground truth:
+
+```text
+explored: 12/109 rooms (11.0%) · 7/136 objects seen (5.1%)
+          0 ever held, 3 stowed · score 0/350 (0.0%)
+```
+
+Both denominators are derived structurally, with no per-game knowledge. **Rooms
+are the siblings of the room you are standing in** — every Z-machine game hangs
+its rooms off one parent object, so the starting room identifies all 109 of
+Zork's on turn one, before the agent has found any of them. **Objects** are
+everything named that is neither a room nor the player.
+
+Identifying the player is the fiddly part, and it is done two ways because
+neither alone is enough. Carried items point at their owner, but that only
+works once something has been picked up, and you start empty-handed — leaving
+the player counted as an object it had "discovered" and coverage reading 112%.
+So the fallback is that **the player is the thing that changes rooms when you
+do**: intersect the contents of each new room across moves and exactly one
+object survives. That converges on the first move.
+
+`stowed` is the generic form of "treasures in the case" — anything put inside a
+container that is neither a room nor the player. In Zork the score is the
+authoritative treasure metric, and it is reported alongside.
+
 ### The discovery ledger
 
 The puzzles are not the interesting part. Before any of them there is a quieter
