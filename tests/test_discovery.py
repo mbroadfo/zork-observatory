@@ -164,6 +164,36 @@ class TestLedgerShape:
         assert summary["found"] == len(ledger.found)
         assert summary["total"] == ledger.total
         assert set(summary["turns"]) == set(ledger.found)
+        assert set(summary["steps"]) == set(ledger.found)
+
+    async def test_discovery_steps_survive_a_rollback(self):
+        """A death rewinds the turn counter. Time-to-discovery measured in
+        turns would silently under-report every run that died — which is the
+        interesting case."""
+        from observatory.agents.base import AgentAction
+
+        class Doomed(ScriptedAgent):
+            def __init__(self):
+                super().__init__([])
+                self._i = 0
+
+            async def act(self, ctx):
+                seq = ["north", "east", "west", "up", "look"]
+                cmd = seq[self._i % len(seq)]
+                self._i += 1
+                return AgentAction(command=cmd)
+
+        bus = EventBus()
+        session = Session(
+            MockEngine(), Doomed(), bus,
+            config=SessionConfig(delay=0.0, max_turns=40, lives=2, checkpoint_every=2),
+        )
+        await session.run()
+
+        assert session.deaths == 3
+        assert session.steps > session.turn      # rollbacks rewound the turn counter
+        for discovery in session.ledger.found.values():
+            assert discovery.step <= session.steps
 
 
 class TestSessionIntegration:

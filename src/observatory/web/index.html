@@ -41,7 +41,14 @@
       <option value="parser" selected>parser — interface explained</option>
       <option value="coached">coached — hints (control arm)</option>
     </select>
-    <input type="number" id="turns" value="60" min="1" max="2000" size="4" title="Turn budget" style="width:66px">
+    <input type="number" id="turns" value="200" min="1" max="5000" size="4"
+           title="Turn BUDGET — the game has no turn limit. Runs stopped by it are marked censored." style="width:70px">
+    <select id="lives" title="Times the world may be rolled back after a death. The agent keeps its memory across a rollback.">
+      <option value="0" selected>ironman</option>
+      <option value="1">1 life</option>
+      <option value="3">3 lives</option>
+      <option value="10">10 lives</option>
+    </select>
     <button id="new-run" class="primary">New run</button>
   </div>
 
@@ -62,6 +69,7 @@
     </div>
     <div class="readout"><span class="label">Turn</span><span class="value" id="r-turn">0</span></div>
     <div class="readout"><span class="label">Rooms</span><span class="value cyan" id="r-rooms">0</span></div>
+    <div class="readout"><span class="label">Deaths</span><span class="value" id="r-deaths">0</span></div>
     <div class="readout"><span class="label">Cost</span><span class="value" id="r-cost">$0.00</span></div>
     <div class="readout"><span class="label">Link</span><span class="value" id="r-link">·</span></div>
   </div>
@@ -115,6 +123,12 @@
       <div class="section">
         <h3>Carrying</h3>
         <ul class="plain" id="s-inventory"><li class="empty">empty-handed</li></ul>
+      </div>
+
+      <div class="section">
+        <h3>Memory <span id="m-count" class="count-inline"></span></h3>
+        <div class="hint" style="margin-bottom:6px">what it kept when the world was rolled back</div>
+        <ol class="memory" id="s-memory"></ol>
       </div>
 
       <div class="section">

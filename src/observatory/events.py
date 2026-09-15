@@ -22,6 +22,8 @@ EventType = Literal[
     "object.delta",
     "checkpoint.created",
     "discovery.made",
+    "lesson.learned",
+    "run.restored",
     "session.ended",
     "error",
 ]

@@ -66,6 +66,7 @@ const state = {
   checkpoints: new Map(),  // id -> {id, label, turn, score, auto}
   discoveries: new Map(),  // key -> {key, label, reveals, turn, evidence}
   discoveriesSeen: new Set(),
+  memory: [],              // lessons the agent kept across rollbacks
   occupied: new Set(),     // "col,row" lattice cells, so rooms never stack
   current: null,
   session: null,
@@ -480,6 +481,25 @@ function renderDiscoveries(manifest) {
     .join("");
 }
 
+function renderMemory(lessons) {
+  const el = $("s-memory");
+  $("m-count").textContent = lessons && lessons.length ? `${lessons.length}` : "";
+  if (!lessons || !lessons.length) {
+    el.innerHTML = '<li class="empty">nothing kept yet</li>';
+    return;
+  }
+  el.innerHTML = lessons
+    .map((l) => {
+      const where = [
+        `life ${l.life}`,
+        `turn ${l.turn}`,
+        l.location || null,
+      ].filter(Boolean).join(" · ");
+      return `<li><span class="where">${escapeHtml(where)}</span>${escapeHtml(l.text)}</li>`;
+    })
+    .join("");
+}
+
 function renderCheckpoints(list) {
   const el = $("s-checkpoints");
   if (!list || !list.length) {
@@ -577,6 +597,22 @@ function handle(event) {
       note(`◆ ${p.label} — ${p.reveals}`);
       break;
 
+    case "lesson.learned":
+      state.memory.push(p);
+      renderMemory(state.memory);
+      note(`✎ kept: ${p.text}`);
+      break;
+
+    case "run.restored":
+      $("r-deaths").textContent = p.deaths;
+      note(
+        p.by_agent
+          ? `↺ the agent restored its own save — world back to turn ${p.to_turn}`
+          : `↺ life ${p.life} — world back to turn ${p.to_turn}, ` +
+            `carrying ${p.carried} note(s). ${p.lives_left} live(s) left`
+      );
+      break;
+
     case "map.update": {
       if (p.new_room) {
         state.rooms.set(p.new_room.id, { ...p.new_room, placed: false });
@@ -602,9 +638,14 @@ function handle(event) {
       const u = p.usage || {};
       note(
         `■ ${p.reason} — ${p.final_score}/${p.max_score} in ${p.turns} turns · ` +
+          `${p.deaths || 0} death(s) · ` +
           `${p.map.rooms} rooms, ${p.map.edges} edges, ${p.map.blocked} blocked` +
           (u.calls ? ` · $${u.cost_usd} over ${u.calls} calls` : "")
       );
+      if (p.censored) {
+        // Not an outcome. Saying so here stops the run being read as a failure.
+        note("  ⚠ stopped by the harness, not the game — this run is censored, not finished", true);
+      }
       setRunning(false, true);
       refresh();
       break;
@@ -629,9 +670,12 @@ function resetView() {
   state.checkpoints.clear();
   state.discoveries.clear();
   state.discoveriesSeen.clear();
+  state.memory = [];
   state.occupied.clear();
   renderCheckpoints([]);
   renderDiscoveries([]);
+  renderMemory([]);
+  $("r-deaths").textContent = "0";
   state.current = null;
   costTotal = 0;
   entryCount = 0;
@@ -716,6 +760,10 @@ function applySummary(s) {
     if (!existing || !existing.turn) state.discoveries.set(d.key, d);
   }
   renderDiscoveries([...state.discoveries.values()]);
+
+  if ((s.memory || []).length >= state.memory.length) state.memory = s.memory || [];
+  renderMemory(state.memory);
+  $("r-deaths").textContent = s.deaths || 0;
   if (s.usage && s.usage.cost_usd) {
     costTotal = s.usage.cost_usd;
     $("r-cost").textContent = `$${costTotal.toFixed(costTotal < 1 ? 4 : 2)}`;
@@ -759,7 +807,8 @@ $("new-run").onclick = async () => {
     model: $("model").value,
     effort: $("effort").value,
     info_level: $("info").value,
-    max_turns: parseInt($("turns").value, 10) || 60,
+    max_turns: parseInt($("turns").value, 10) || 200,
+    lives: parseInt($("lives").value, 10) || 0,
     delay: 0.35,
   };
   const data = await post("/api/session", body);

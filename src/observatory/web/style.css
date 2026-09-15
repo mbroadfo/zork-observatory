@@ -307,6 +307,27 @@ ul.plain li.empty { color: var(--dimmer); font-style: italic; }
 
 .count-inline { color: var(--dimmer); font-weight: 400; letter-spacing: 0; }
 
+/* Lessons are the agent's own words — set them apart from harness text. */
+ol.memory { list-style: none; margin: 0; padding: 0; font-size: 11.5px; }
+ol.memory li {
+  border-left: 2px solid var(--amber-soft);
+  padding: 4px 0 5px 9px;
+  margin-bottom: 6px;
+  color: var(--text);
+}
+ol.memory li .where {
+  display: block;
+  color: var(--dimmer);
+  font-size: 10px;
+  margin-bottom: 2px;
+  letter-spacing: .04em;
+}
+ol.memory li.empty {
+  border-left-color: var(--line);
+  color: var(--dimmer);
+  font-style: italic;
+}
+
 /* The ledger reads as much by what is still grey as by what has lit up. */
 ul.ledger { list-style: none; margin: 0; padding: 0; font-size: 11.5px; }
 ul.ledger li {

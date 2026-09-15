@@ -14,7 +14,7 @@ import json
 import time
 from typing import Any
 
-from . import prompts
+from . import memory, prompts
 from .base import Agent, AgentAction, TurnContext
 
 # How much the agent is told is an experimental variable — see prompts.py for
@@ -122,6 +122,16 @@ class ClaudeAgent(Agent):
         rope; it is the single biggest cost lever here.
         """
         lines = []
+
+        # The memory goes first and outside the transcript window. It is the
+        # one thing that must not scroll off — it is what the agent kept when
+        # the world was rolled back, and dropping it silently would make every
+        # death teach nothing.
+        remembered = self.memory.render()
+        if remembered:
+            lines.append(remembered)
+            lines.append("")
+
         for command, response in ctx.transcript[-self.history_turns:]:
             if command:
                 lines.append(f"> {command}")
@@ -194,6 +204,51 @@ class ClaudeAgent(Agent):
                 "cache_read_tokens": getattr(response.usage, "cache_read_input_tokens", 0),
             },
         )
+
+    async def reflect(self, ctx: TurnContext, cause: str) -> str | None:
+        """One extra call, at the moment the run is about to be rolled back.
+
+        Deliberately given the tail of the transcript and nothing else — no
+        object tree, no cause of death from the engine, not even the harness's
+        own word for what happened beyond what the game printed. If the agent
+        misreads its own death, that misreading is the thing worth recording.
+        """
+        import anthropic
+
+        lines = []
+        remembered = self.memory.render()
+        if remembered:
+            lines.append(remembered)
+            lines.append("")
+        for command, response in ctx.transcript[-12:]:
+            if command:
+                lines.append(f"> {command}")
+            lines.append(response.strip())
+        lines.append("")
+        lines.append(memory.REFLECT)
+
+        try:
+            response = await self._client.messages.create(
+                model=self.model,
+                max_tokens=400,
+                system=[{"type": "text", "text": self.system, "cache_control": {"type": "ephemeral"}}],
+                output_config={"effort": self.effort},
+                messages=[{"role": "user", "content": "\n".join(lines)}],
+            )
+        except (anthropic.APIStatusError, anthropic.APIConnectionError):
+            return None
+
+        if response.stop_reason == "refusal":
+            return None
+
+        self._totals["input_tokens"] += getattr(response.usage, "input_tokens", 0) or 0
+        self._totals["output_tokens"] += getattr(response.usage, "output_tokens", 0) or 0
+        self._totals["cost_usd"] += estimate_cost(self.model, response.usage)
+        self._totals["calls"] += 1
+        self._totals["reflections"] = self._totals.get("reflections", 0) + 1
+
+        text = next((b.text for b in response.content if b.type == "text"), "").strip()
+        return text or None
 
     def describe(self) -> dict[str, Any]:
         return {

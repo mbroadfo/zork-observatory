@@ -55,12 +55,24 @@ class TestSessionLoop:
         assert order.index("command.issued") < order.index("observation")
         assert "turn.begin" in order
 
-    async def test_turn_limit_stops_the_run(self):
+    async def test_the_turn_budget_stops_the_run_and_marks_it_censored(self):
+        """A budget is a harness stop, not an outcome. The run must say so, or
+        every time-to-discovery statistic built on it is wrong."""
         session, _, seen = make_session(agent=RandomAgent(seed=3), max_turns=5)
         await session.run()
 
         assert session.turn == 5
-        assert seen[-1].payload["reason"] == "turn limit reached"
+        assert seen[-1].payload["reason"] == "turn budget exhausted"
+        assert seen[-1].payload["censored"] is True
+        assert session.censored is True
+
+    async def test_reaching_a_real_ending_is_not_censored(self):
+        session, _, seen = make_session(max_turns=40)
+        await session.run()
+
+        assert session.end_reason == "victory"
+        assert seen[-1].payload["censored"] is False
+        assert session.censored is False
 
     async def test_sequence_numbers_are_gapless(self):
         _, bus, seen = make_session()

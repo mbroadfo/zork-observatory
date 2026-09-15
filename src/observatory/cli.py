@@ -26,7 +26,16 @@ def _add_run_args(p: argparse.ArgumentParser) -> None:
              "game (it is a game, nothing else), parser (interface explained; default), "
              "coached (hazards and tactics — the contaminated control arm)",
     )
-    p.add_argument("--turns", type=int, default=50)
+    p.add_argument("--turns", type=int, default=400,
+                   help="turn BUDGET, not a rule — the game has no turn limit. "
+                        "Runs stopped by it are reported as censored")
+    p.add_argument("--max-cost", type=float, default=0.0,
+                   help="stop once the agent has spent this many USD (0 = no ceiling)")
+    p.add_argument("--lives", type=int, default=0,
+                   help="times the world may be rolled back after a death (0 = ironman). "
+                        "The agent keeps its memory across a rollback, nothing else")
+    p.add_argument("--no-agent-save", action="store_true",
+                   help="withhold SAVE/RESTORE from the agent")
     p.add_argument("--seed", type=int, default=12345)
     p.add_argument("--history-turns", type=int, default=30)
     p.add_argument("--trace", default=None, help="write a JSONL trace here")
@@ -55,12 +64,20 @@ async def _play(args: argparse.Namespace) -> int:
             print(f"  \033[36m[map: {s['rooms']} rooms, {s['edges']} edges, {s['blocked']} blocked]\033[0m\n")
         elif event.type == "discovery.made":
             print(f"  \033[35m◆ {p['label']} — {p['reveals']}  ({p['evidence']})\033[0m\n")
+        elif event.type == "lesson.learned":
+            print(f"  \033[33m✎ kept: {p['text']}\033[0m\n")
+        elif event.type == "run.restored":
+            print(f"  \033[33m↺ life {p['life']} — world back to turn {p['to_turn']}, "
+                  f"carrying {p['carried']} note(s). {p['lives_left']} live(s) left\033[0m\n")
         elif event.type == "session.ended":
-            print(f"=== {p['reason']} — score {p['final_score']}/{p['max_score']} in {p['turns']} turns ===")
+            censored = "  [CENSORED: stopped by the harness, not the game]" if p.get("censored") else ""
+            print(f"=== {p['reason']} — score {p['final_score']}/{p['max_score']} "
+                  f"in {p['turns']} turns, {p.get('deaths', 0)} death(s) ==={censored}")
             print(f"    map: {p['map']}")
             d = p["discoveries"]
-            print(f"    discovered {d['found']}/{d['total']}: "
-                  + ", ".join(f"{k}@{v}" for k, v in sorted(d["turns"].items(), key=lambda kv: kv[1])))
+            # Reported against `step`, which rollbacks don't rewind.
+            print(f"    discovered {d['found']}/{d['total']} over {p['steps']} steps: "
+                  + ", ".join(f"{k}@{v}" for k, v in sorted(d["steps"].items(), key=lambda kv: kv[1])))
             if p["usage"].get("calls"):
                 u = p["usage"]
                 print(f"    cost: ${u['cost_usd']} over {u['calls']} calls "
@@ -73,11 +90,24 @@ async def _play(args: argparse.Namespace) -> int:
 
     session = Session(
         engine, agent, bus,
-        config=SessionConfig(max_turns=args.turns, delay=0.0, history_turns=args.history_turns),
+        config=SessionConfig(
+            max_turns=args.turns,
+            max_cost_usd=args.max_cost,
+            lives=args.lives,
+            allow_agent_save=not args.no_agent_save,
+            delay=0.0,
+            history_turns=args.history_turns,
+        ),
         trace=trace,
     )
     await session.run()
     engine.close()
+
+    if agent.memory.lessons:
+        print("\n--- what it wrote down and kept ---")
+        for lesson in agent.memory.lessons:
+            where = f", {lesson.location}" if lesson.location else ""
+            print(f"  life {lesson.life} (turn {lesson.turn}{where}): {lesson.text}")
     return 0
 
 

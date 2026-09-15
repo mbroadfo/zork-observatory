@@ -117,7 +117,16 @@ class Discovery:
     key: str
     label: str
     reveals: str
+
+    # `turn` is the in-world turn counter, which a rollback rewinds — after a
+    # death at turn 52 restores to turn 40, the next turn is 41 again. `step`
+    # is the number of turns actually played and never goes backwards.
+    #
+    # Time-to-discovery must be measured in steps. Using `turn` silently
+    # under-reports every run that died, and dying is the interesting case.
+    step: int = 0
     turn: int = 0
+    life: int = 1
     command: str = ""
     evidence: str = ""
 
@@ -304,6 +313,8 @@ class DiscoveryLedger:
         obs: Observation,
         state: WorldState,
         prev_state: WorldState | None,
+        step: int = 0,
+        life: int = 1,
     ) -> list[Discovery]:
         ctx = Turn(
             turn=turn,
@@ -327,7 +338,8 @@ class DiscoveryLedger:
             if evidence:
                 discovery = Discovery(
                     key=key, label=label, reveals=reveals,
-                    turn=turn, command=command, evidence=evidence,
+                    step=step or turn, turn=turn, life=life,
+                    command=command, evidence=evidence,
                 )
                 self.found[key] = discovery
                 new.append(discovery)
@@ -353,5 +365,8 @@ class DiscoveryLedger:
         return {
             "found": len(self.found),
             "total": self.total,
+            # Keyed on `step`, the rollback-proof counter — this is the one
+            # downstream analysis should use.
+            "steps": {k: d.step for k, d in self.found.items()},
             "turns": {k: d.turn for k, d in self.found.items()},
         }

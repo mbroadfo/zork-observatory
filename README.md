@@ -168,6 +168,79 @@ Detectors are deliberately conservative and use world-state changes wherever
 possible: a false discovery silently corrupts the number the whole experiment
 reports, so when in doubt they don't fire.
 
+### The baseline has to be ignorant too
+
+The same rule that governs prompts governs the random agent. Its first version
+sampled from a list I wrote containing `open mailbox` and `take lamp` — so it
+could "discover" containers by luck, because I'd told it a mailbox existed.
+That's the prompt-contamination bug in a different file.
+
+It now harvests nouns from the text the game has actually printed, and combines
+them with generic English verbs. Its vocabulary grows exactly as fast as its
+exposure does, and pointing it at a different story file leaves it equally
+ignorant — which is what makes it a floor rather than a sandbagged one.
+
+`--valid-actions` makes it sample from the engine's own valid-move set instead.
+That is a *much stronger* baseline — an oracle listing every move that would
+change the world. Useful as a ceiling for random play; never report it as the
+floor.
+
+### There is no turn limit, only a budget
+
+Zork has no turn limit. It has a lamp that runs down and a world that kills you,
+and those are the real constraints. `--turns` exists to stop a runaway loop
+spending money, and a run that hits it is reported as **censored**:
+
+```text
+=== turn budget exhausted — score 0/50 in 150 turns, 1 death(s) ===
+    [CENSORED: stopped by the harness, not the game]
+```
+
+This matters more than it looks. An agent that hadn't discovered containers by
+turn 150 has not *failed* to discover them — it ran out of budget. Those are
+right-censored observations, and treating them as outcomes would corrupt every
+time-to-discovery statistic the ledger produces. `--max-cost` is the other
+budget, and usually the one that actually binds.
+
+Relatedly, discoveries are timestamped in **steps**, not turns. A death rolls
+the turn counter back; steps only ever go up. Time-to-discovery measured in
+turns would silently under-report every run that died, which is the interesting
+case.
+
+### Death, saves, and the one thing that carries over
+
+A human played Zork with a save file. Die, restore, try something else — and
+crucially, the world goes back but *you* don't. You lost the lamp and the twelve
+points and you kept the sentence that matters: don't go down there without a
+light.
+
+```bash
+observatory play --agent claude --lives 3 --turns 400
+```
+
+- `--lives N` — how many times the world may be rolled back after a death.
+  Default 0, ironman.
+- The agent can also type `SAVE` and `RESTORE` itself. These are intercepted
+  before the parser sees them (a real Z-machine prompts for a filename, which
+  would deadlock a loop that sends one line per turn) and are backed by the same
+  snapshot machinery as branching. `--no-agent-save` withholds them.
+- On death the agent is asked one question — what it believes happened and what
+  it intends to do differently — and whatever it writes is kept. **That memory
+  survives every rollback for the rest of the run.** Nothing else does.
+
+The rollback deliberately steps back a margin rather than to the newest
+checkpoint. Checkpoints land on a timer, so the most recent one is often *inside*
+the thing that just killed you — restore there and the run burns every life in
+four turns without ever acting on what it learned. An agent's own `SAVE` is
+never second-guessed.
+
+The memory is a belief, not a fact. An agent can draw the wrong lesson and carry
+it for the rest of the run, and reading a confidently wrong memory against the
+object tree is more interesting than reading a right one. Lessons are the
+agent's own words, verbatim, and they travel in the trace — so comparing what
+different models wrote down after dying in the same place is a real artifact in
+a way comparing two scorelines never is.
+
 ### Rewinding doesn't erase knowledge
 
 `Session.rewind()` restores the world to a checkpoint but leaves the map intact.
@@ -224,8 +297,13 @@ The instrument is the foundation. What it's for:
   rooms it thinks are distinct that are the same place, exits it invented,
   objects it believes it dropped. Map fidelity over turns as a metric.
 - **Populations** — N agents from an identical cold start, comparing the
-  *distribution* of discovery turns rather than single runs. Time-to-first-
-  container, time-to-first-death, vocabulary breadth probed. Failure is data.
+  *distribution* of discovery steps rather than single runs. Time-to-first-
+  container, time-to-first-death, vocabulary breadth probed. Failure is data,
+  and censored runs are handled as censored.
+- **Memory archaeology** — diff what different models wrote down after dying in
+  the same room. Which ones blamed the right thing? Which carried a wrong
+  lesson for two hundred turns? The lessons are already recorded verbatim in
+  every trace; this is the analysis pass over them.
 - **Tournament mode** — interleaved agents in one world via snapshot/restore,
   plus a shared message channel.
 - **First-person** — one cached still per room, keyed to room and lighting,

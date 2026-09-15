@@ -86,7 +86,9 @@ class NewSession(BaseModel):
     model: str = "claude-opus-5"
     effort: str = "medium"
     info_level: str = "parser"
-    max_turns: int = 200
+    max_turns: int = 400
+    max_cost_usd: float = 0.0
+    lives: int = 0
     delay: float = 0.35
     seed: int = 12345
     history_turns: int = 30
@@ -168,6 +170,8 @@ async def new_session(req: NewSession) -> JSONResponse:
         bus=hub.bus,
         config=SessionConfig(
             max_turns=req.max_turns,
+            max_cost_usd=req.max_cost_usd,
+            lives=req.lives,
             delay=req.delay,
             collect_valid_actions=req.valid_actions,
             history_turns=req.history_turns,
