@@ -35,6 +35,12 @@
       <option value="medium" selected>medium</option>
       <option value="high">high</option>
     </select>
+    <select id="info" title="How much the agent is told before it starts" style="display:none">
+      <option value="cold">cold — bare terminal</option>
+      <option value="game">game — it's a game</option>
+      <option value="parser" selected>parser — interface explained</option>
+      <option value="coached">coached — hints (control arm)</option>
+    </select>
     <input type="number" id="turns" value="60" min="1" max="2000" size="4" title="Turn budget" style="width:66px">
     <button id="new-run" class="primary">New run</button>
   </div>
@@ -109,6 +115,12 @@
       <div class="section">
         <h3>Carrying</h3>
         <ul class="plain" id="s-inventory"><li class="empty">empty-handed</li></ul>
+      </div>
+
+      <div class="section">
+        <h3>Discoveries <span id="d-count" class="count-inline"></span></h3>
+        <div class="hint" style="margin-bottom:6px">what its behaviour has established about the world</div>
+        <ul class="ledger" id="s-discoveries"></ul>
       </div>
 
       <div class="section">

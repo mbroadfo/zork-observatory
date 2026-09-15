@@ -64,6 +64,8 @@ const state = {
   edges: new Map(),        // key -> {src, dst, direction, reciprocal}
   blocked: new Map(),      // key -> {src, direction, message}
   checkpoints: new Map(),  // id -> {id, label, turn, score, auto}
+  discoveries: new Map(),  // key -> {key, label, reveals, turn, evidence}
+  discoveriesSeen: new Set(),
   occupied: new Set(),     // "col,row" lattice cells, so rooms never stack
   current: null,
   session: null,
@@ -447,6 +449,37 @@ function renderDelta(changes) {
     .join("");
 }
 
+/* The ledger is rendered in full from the first frame, with undiscovered rows
+ * greyed rather than absent. An empty row is data: "never established that
+ * objects can be carried" is a finding, and hiding it until it happens would
+ * make the pane look like a growing list of successes instead of a checklist
+ * the run is being measured against. */
+function renderDiscoveries(manifest) {
+  const el = $("s-discoveries");
+  if (!manifest || !manifest.length) {
+    el.innerHTML = '<li class="empty">no session</li>';
+    $("d-count").textContent = "";
+    return;
+  }
+  const found = manifest.filter((d) => d.turn > 0).length;
+  $("d-count").textContent = `${found} / ${manifest.length}`;
+
+  el.innerHTML = manifest
+    .map((d) => {
+      const isNew = d.turn > 0 && !state.discoveriesSeen.has(d.key);
+      if (d.turn > 0) state.discoveriesSeen.add(d.key);
+      const cls = ["", d.turn > 0 ? "found" : "", isNew ? "fresh" : ""].join(" ").trim();
+      const turn = d.turn > 0 ? d.turn : "·";
+      const detail = d.evidence ? ` — ${escapeHtml(d.evidence)}` : "";
+      return (
+        `<li class="${cls}" title="${escapeHtml(d.reveals)}${detail}">` +
+        `<span class="turn">${turn}</span>` +
+        `<span class="what">${escapeHtml(d.label)}</span></li>`
+      );
+    })
+    .join("");
+}
+
 function renderCheckpoints(list) {
   const el = $("s-checkpoints");
   if (!list || !list.length) {
@@ -538,6 +571,12 @@ function handle(event) {
       renderCheckpoints([...state.checkpoints.values()]);
       break;
 
+    case "discovery.made":
+      state.discoveries.set(p.key, p);
+      renderDiscoveries([...state.discoveries.values()]);
+      note(`◆ ${p.label} — ${p.reveals}`);
+      break;
+
     case "map.update": {
       if (p.new_room) {
         state.rooms.set(p.new_room.id, { ...p.new_room, placed: false });
@@ -588,8 +627,11 @@ function resetView() {
   state.edges.clear();
   state.blocked.clear();
   state.checkpoints.clear();
+  state.discoveries.clear();
+  state.discoveriesSeen.clear();
   state.occupied.clear();
   renderCheckpoints([]);
+  renderDiscoveries([]);
   state.current = null;
   costTotal = 0;
   entryCount = 0;
@@ -665,6 +707,15 @@ function applySummary(s) {
   $("r-turn").textContent = s.turn;
   for (const cp of s.checkpoints || []) state.checkpoints.set(cp.id, cp);
   renderCheckpoints([...state.checkpoints.values()]);
+
+  // The summary carries the full ledger including rows not yet discovered.
+  // Events and this snapshot can arrive in either order, so a row that is
+  // already found here never loses to an empty one from the manifest.
+  for (const d of s.discoveries || []) {
+    const existing = state.discoveries.get(d.key);
+    if (!existing || !existing.turn) state.discoveries.set(d.key, d);
+  }
+  renderDiscoveries([...state.discoveries.values()]);
   if (s.usage && s.usage.cost_usd) {
     costTotal = s.usage.cost_usd;
     $("r-cost").textContent = `$${costTotal.toFixed(costTotal < 1 ? 4 : 2)}`;
@@ -685,8 +736,10 @@ function setRunning(running, finished) {
 
 function syncAgentControls() {
   const agent = $("agent").value;
-  $("model").style.display = agent === "claude" ? "" : "none";
-  $("effort").style.display = agent === "claude" ? "" : "none";
+  const llm = agent === "claude";
+  $("model").style.display = llm ? "" : "none";
+  $("effort").style.display = llm ? "" : "none";
+  $("info").style.display = llm ? "" : "none";
   $("input-row").classList.toggle("on", agent === "human");
 }
 
@@ -705,6 +758,7 @@ $("new-run").onclick = async () => {
     agent: $("agent").value,
     model: $("model").value,
     effort: $("effort").value,
+    info_level: $("info").value,
     max_turns: parseInt($("turns").value, 10) || 60,
     delay: 0.35,
   };

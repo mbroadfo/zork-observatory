@@ -85,6 +85,7 @@ class NewSession(BaseModel):
     agent: str = "random"
     model: str = "claude-opus-5"
     effort: str = "medium"
+    info_level: str = "parser"
     max_turns: int = 200
     delay: float = 0.35
     seed: int = 12345
@@ -145,6 +146,7 @@ async def new_session(req: NewSession) -> JSONResponse:
             model=req.model,
             effort=req.effort,
             history_turns=req.history_turns,
+            info_level=req.info_level,
         )
     except Exception as exc:
         engine.close()

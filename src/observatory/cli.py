@@ -20,6 +20,12 @@ def _add_run_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--agent", default="random", choices=["random", "scripted", "human", "claude"])
     p.add_argument("--model", default="claude-opus-5")
     p.add_argument("--effort", default="medium", choices=["low", "medium", "high", "xhigh", "max"])
+    p.add_argument(
+        "--info-level", default="parser", choices=["cold", "game", "parser", "coached"],
+        help="how much the agent is told before it starts: cold (a bare terminal), "
+             "game (it is a game, nothing else), parser (interface explained; default), "
+             "coached (hazards and tactics — the contaminated control arm)",
+    )
     p.add_argument("--turns", type=int, default=50)
     p.add_argument("--seed", type=int, default=12345)
     p.add_argument("--history-turns", type=int, default=30)
@@ -30,7 +36,7 @@ async def _play(args: argparse.Namespace) -> int:
     engine = build_engine(args.engine, rom=args.rom, seed=args.seed)
     agent = build_agent(
         args.agent, seed=args.seed, model=args.model, effort=args.effort,
-        history_turns=args.history_turns,
+        history_turns=args.history_turns, info_level=args.info_level,
     )
     bus = EventBus()
 
@@ -47,9 +53,14 @@ async def _play(args: argparse.Namespace) -> int:
         elif event.type == "map.update":
             s = p["stats"]
             print(f"  \033[36m[map: {s['rooms']} rooms, {s['edges']} edges, {s['blocked']} blocked]\033[0m\n")
+        elif event.type == "discovery.made":
+            print(f"  \033[35m◆ {p['label']} — {p['reveals']}  ({p['evidence']})\033[0m\n")
         elif event.type == "session.ended":
             print(f"=== {p['reason']} — score {p['final_score']}/{p['max_score']} in {p['turns']} turns ===")
             print(f"    map: {p['map']}")
+            d = p["discoveries"]
+            print(f"    discovered {d['found']}/{d['total']}: "
+                  + ", ".join(f"{k}@{v}" for k, v in sorted(d["turns"].items(), key=lambda kv: kv[1])))
             if p["usage"].get("calls"):
                 u = p["usage"]
                 print(f"    cost: ${u['cost_usd']} over {u['calls']} calls "
@@ -96,6 +107,14 @@ def _serve(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Windows consoles still default to cp1252, which mangles the box-drawing
+    # and bullet characters used below into replacement marks.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+        except (AttributeError, ValueError):
+            pass
+
     parser = argparse.ArgumentParser(prog="observatory", description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
 

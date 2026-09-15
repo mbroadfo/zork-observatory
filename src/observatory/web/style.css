@@ -305,6 +305,34 @@ ul.plain li.empty { color: var(--dimmer); font-style: italic; }
 
 .hint { color: var(--dimmer); font-size: 11px; font-style: italic; }
 
+.count-inline { color: var(--dimmer); font-weight: 400; letter-spacing: 0; }
+
+/* The ledger reads as much by what is still grey as by what has lit up. */
+ul.ledger { list-style: none; margin: 0; padding: 0; font-size: 11.5px; }
+ul.ledger li {
+  display: flex;
+  gap: 7px;
+  align-items: baseline;
+  padding: 2px 0;
+  color: var(--dimmer);
+  border-bottom: 1px solid var(--line-soft);
+}
+ul.ledger li .turn {
+  min-width: 26px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--dimmer);
+}
+ul.ledger li .what { flex: 1; }
+ul.ledger li.found { color: var(--text); }
+ul.ledger li.found .turn { color: var(--violet); }
+ul.ledger li.found .what { color: var(--text); }
+ul.ledger li.fresh { animation: lit 1.4s ease-out; }
+@keyframes lit {
+  0% { background: #2a2145; }
+  100% { background: transparent; }
+}
+
 #toast {
   position: fixed;
   bottom: 16px;

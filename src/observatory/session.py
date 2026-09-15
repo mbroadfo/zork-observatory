@@ -22,6 +22,7 @@ from .agents.base import Agent, TurnContext
 from .engine.base import GameEngine, Observation, WorldState
 from .events import EventBus
 from .trace import TraceWriter
+from .world.discovery import DiscoveryLedger
 from .world.graph import MapGraph
 from .world.objects import build_tree, diff_objects, name_for
 
@@ -70,6 +71,7 @@ class Session:
         self.trace = trace
 
         self.map = MapGraph()
+        self.ledger = DiscoveryLedger()
         self.transcript: list[tuple[str, str]] = []
         self.checkpoints: dict[str, Checkpoint] = {}
 
@@ -175,6 +177,13 @@ class Session:
                 **{k: v for k, v in delta.items() if v},
             )
 
+        # What the agent has worked out about the shape of the world, judged by
+        # what it did rather than what it claimed.
+        for discovery in self.ledger.observe(
+            self.turn, command, obs, state, self._last_state
+        ):
+            self._emit("discovery.made", **discovery.to_dict(), summary=self.ledger.summary())
+
         self.transcript.append((command, obs.text))
         self._prev_objects = list(state.objects)
         self._prev_room_id = room_id
@@ -272,6 +281,7 @@ class Session:
             final_score=state.score if state else 0,
             max_score=state.max_score if state else 0,
             map=self.map.stats(),
+            discoveries=self.ledger.summary(),
             usage=self.agent.usage(),
         )
         await self.agent.on_end(reason)
@@ -357,6 +367,7 @@ class Session:
             "location": state.location_name if state else "",
             "inventory": state.inventory if state else [],
             "map": self.map.stats(),
+            "discoveries": self.ledger.manifest(),
             "usage": self.agent.usage(),
             "checkpoints": [
                 {

@@ -21,6 +21,7 @@ EventType = Literal[
     "map.update",
     "object.delta",
     "checkpoint.created",
+    "discovery.made",
     "session.ended",
     "error",
 ]

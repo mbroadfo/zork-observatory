@@ -14,37 +14,18 @@ import json
 import time
 from typing import Any
 
+from . import prompts
 from .base import Agent, AgentAction, TurnContext
 
-# The system prompt describes the INTERFACE and nothing else.
-#
-# No hints, no hazards, no strategy, and no nouns drawn from any real game. A
-# run is only evidence about the model if the model discovered the world
-# itself — the moment the prompt says "darkness is lethal" or names a mailbox,
-# the score measures the prompt as much as the player. Parser grammar and the
-# meta-commands are fair: that is how to operate the terminal, not what is in
-# the world.
-#
-# If you add a line here, ask whether a first-time player could know it before
-# the game told them. If not, it does not belong.
-SYSTEM = """You are playing a text adventure game. You see only what the game prints, \
-exactly as a human player would.
+# How much the agent is told is an experimental variable — see prompts.py for
+# the ladder and for why "cold" does not produce a naive player. Every level
+# below `coached` is held to one rule: describe the interface, never the world.
+# tests/test_prompt_hygiene.py enforces it.
+DEFAULT_INFO_LEVEL = "parser"
 
-The interface:
-- Reply with ONE command per turn, in the game's own terse style: VERB, VERB NOUN, \
-or VERB NOUN PREPOSITION NOUN.
-- These words move you: north, south, east, west, northeast, northwest, southeast, \
-southwest, up, down, in, out (abbreviated n, s, e, w, ne, nw, se, sw, u, d).
-- "look" redescribes your surroundings. "inventory" lists what you are carrying.
-- The parser has a small vocabulary. A reply like "I don't know that word" means \
-it did not understand the wording, not that the idea was wrong.
-
-In your reasoning, state what you currently believe: where you are, what you are \
-carrying, which exits you have not tried, and what you are trying to achieve.
-
-Your objective is to score as many points as possible. You have a limited number \
-of turns."""
-
+# Kept as module-level names because the hygiene tests and older callers refer
+# to them; both track the default rung.
+SYSTEM = prompts.get(DEFAULT_INFO_LEVEL)
 SYSTEM_FINGERPRINT = hashlib.sha256(SYSTEM.encode()).hexdigest()[:12]
 
 # Output stays deliberately small — this is called once per turn, hundreds of
@@ -54,13 +35,16 @@ MOVE_SCHEMA = {
     "schema": {
         "type": "object",
         "properties": {
+            # Phrased without presupposing rooms, objects or a parser — at the
+            # "cold" rung the agent has not established that any of those exist,
+            # and a schema that assumes them would leak the answer.
             "reasoning": {
                 "type": "string",
-                "description": "Two or three sentences: where you think you are, what you believe, what you are trying next.",
+                "description": "Two or three sentences: what you currently believe, and what you are trying next.",
             },
             "command": {
                 "type": "string",
-                "description": "The single command to send to the game parser.",
+                "description": "The single line of text to type next.",
             },
         },
         "required": ["reasoning", "command"],
@@ -105,6 +89,7 @@ class ClaudeAgent(Agent):
         effort: str = "medium",
         history_turns: int = 30,
         max_tokens: int = 2000,
+        info_level: str = DEFAULT_INFO_LEVEL,
         api_key: str | None = None,
     ) -> None:
         import anthropic
@@ -113,7 +98,9 @@ class ClaudeAgent(Agent):
         self.effort = effort
         self.history_turns = history_turns
         self.max_tokens = max_tokens
-        self.name = f"claude:{model}"
+        self.info_level = info_level
+        self.system = prompts.get(info_level)
+        self.name = f"claude:{model}" + ("" if info_level == DEFAULT_INFO_LEVEL else f"/{info_level}")
         self._client = anthropic.AsyncAnthropic(api_key=api_key) if api_key else anthropic.AsyncAnthropic()
         self._totals = {
             "input_tokens": 0,
@@ -156,7 +143,7 @@ class ClaudeAgent(Agent):
                 system=[
                     {
                         "type": "text",
-                        "text": SYSTEM,
+                        "text": self.system,
                         "cache_control": {"type": "ephemeral"},
                     }
                 ],
@@ -216,8 +203,9 @@ class ClaudeAgent(Agent):
             "effort": self.effort,
             "history_turns": self.history_turns,
             "max_tokens": self.max_tokens,
-            "system_prompt": SYSTEM,
-            "system_fingerprint": SYSTEM_FINGERPRINT,
+            "info_level": self.info_level,
+            "system_prompt": self.system,
+            "system_fingerprint": prompts.fingerprint(self.info_level),
         }
 
     def usage(self) -> dict[str, Any]:

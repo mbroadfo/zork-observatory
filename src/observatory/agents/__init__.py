@@ -1,3 +1,4 @@
+from . import prompts
 from .base import Agent, AgentAction, TurnContext
 from .simple import MOCK_WALKTHROUGH, HumanAgent, RandomAgent, ScriptedAgent
 
@@ -5,6 +6,7 @@ __all__ = [
     "Agent",
     "AgentAction",
     "TurnContext",
+    "prompts",
     "RandomAgent",
     "ScriptedAgent",
     "HumanAgent",
@@ -29,5 +31,6 @@ def build_agent(kind: str, **kwargs) -> Agent:
             model=kwargs.get("model", "claude-opus-5"),
             effort=kwargs.get("effort", "medium"),
             history_turns=kwargs.get("history_turns", 30),
+            info_level=kwargs.get("info_level", "parser"),
         )
     raise ValueError(f"Unknown agent: {kind!r} (expected random, scripted, human or claude)")
