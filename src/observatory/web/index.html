@@ -15,10 +15,10 @@
 
   <div class="controls">
     <select id="engine" title="Game engine">
-      <option value="mock">mock world</option>
-      <option value="jericho">jericho</option>
+      <option value="jericho" selected>jericho</option>
+      <option value="mock">mock (test fixture)</option>
     </select>
-    <input type="text" id="rom" placeholder="roms/zork1.z5" size="16" style="display:none">
+    <input type="text" id="rom" value="roms/zork1.z5" placeholder="roms/zork1.z5" size="15">
     <select id="agent" title="Who plays">
       <option value="random">random</option>
       <option value="scripted">scripted</option>
@@ -96,6 +96,7 @@
     <div class="pane-head">
       Map <span class="count" id="m-count">discovered by exploration</span>
       <span class="spacer"></span>
+      <button id="toggle-blocked">show walls</button>
       <button id="fit">fit</button>
     </div>
     <div id="map"></div>
@@ -114,29 +115,10 @@
     <div class="pane-head">World state <span class="count">ground truth</span></div>
     <div class="pane-body">
       <div class="section">
-        <h3>Location</h3>
-        <div class="kv"><span class="k">room</span><span class="v" id="s-room">—</span></div>
-        <div class="kv"><span class="k">state hash</span><span class="v" id="s-hash">—</span></div>
-        <div class="kv"><span class="k">objects</span><span class="v" id="s-objects">0</span></div>
-      </div>
-
-      <div class="section">
-        <h3>Carrying <span id="inv-count" class="count-inline"></span></h3>
-        <ul class="plain" id="s-inventory"><li class="empty">empty-handed</li></ul>
-      </div>
-
-      <div class="section">
-        <h3>Containers <span id="c-count" class="count-inline"></span></h3>
-        <div class="hint" style="margin-bottom:6px">anything in the world holding something else</div>
-        <ul class="plain containers" id="s-containers"><li class="empty">none seen</li></ul>
-      </div>
-
-      <div class="section">
         <h3>Coverage</h3>
         <div class="hint" style="margin-bottom:6px">denominators come from the engine's object table</div>
         <div id="cov-rows"></div>
       </div>
-
       <div class="section">
         <h3>Turn quality</h3>
         <div class="headline" id="q-headline">
@@ -151,34 +133,43 @@
           <span class="k">known dead ends</span><span class="v" id="q-deadends">0</span>
         </div>
       </div>
-
-      <div class="section">
-        <h3>Memory <span id="m-count" class="count-inline"></span></h3>
-        <div class="hint" style="margin-bottom:6px">what it kept when the world was rolled back</div>
-        <ol class="memory" id="s-memory"></ol>
-      </div>
-
       <div class="section">
         <h3>Discoveries <span id="d-count" class="count-inline"></span></h3>
         <div class="hint" style="margin-bottom:6px">what its behaviour has established about the world</div>
         <ul class="ledger" id="s-discoveries"></ul>
       </div>
-
+      <div class="section">
+        <h3>Memory <span id="mem-count" class="count-inline"></span></h3>
+        <div class="hint" style="margin-bottom:6px">what it kept when the world was rolled back</div>
+        <ol class="memory" id="s-memory"></ol>
+      </div>
       <div class="section">
         <h3>This turn changed</h3>
         <div class="delta" id="s-delta"><div class="hint">nothing yet</div></div>
       </div>
-
+      <div class="section">
+        <h3>Location</h3>
+        <div class="kv"><span class="k">room</span><span class="v" id="s-room">—</span></div>
+        <div class="kv"><span class="k">state hash</span><span class="v" id="s-hash">—</span></div>
+        <div class="kv"><span class="k">objects</span><span class="v" id="s-objects">0</span></div>
+      </div>
+      <div class="section">
+        <h3>Carrying <span id="inv-count" class="count-inline"></span></h3>
+        <ul class="plain" id="s-inventory"><li class="empty">empty-handed</li></ul>
+      </div>
+      <div class="section">
+        <h3>Containers <span id="c-count" class="count-inline"></span></h3>
+        <div class="hint" style="margin-bottom:6px">only ones the agent has actually seen</div>
+        <ul class="plain containers" id="s-containers"><li class="empty">none seen</li></ul>
+      </div>
       <div class="section">
         <h3>Checkpoints</h3>
         <div class="chips" id="s-checkpoints"><span class="hint">none — press ⚑ Mark</span></div>
       </div>
-
       <div class="section">
         <h3>Object tree</h3>
         <div class="tree" id="s-tree"><div class="hint">no session</div></div>
       </div>
-
       <div class="section">
         <h3>Traces</h3>
         <div class="chips" id="s-traces"><span class="hint">none recorded</span></div>

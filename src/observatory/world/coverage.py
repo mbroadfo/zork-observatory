@@ -16,6 +16,12 @@ particular game:
 
   Objects are everything named that is not a room and not the player.
 
+One honest limitation: "seen" means "in the current room's subtree", which
+includes things inside a closed container the agent never opened. Telling open
+from closed needs a per-game attribute number the engine does not name, so
+objects-seen is an upper bound on what the agent actually observed, not an
+exact count. It is stated here rather than quietly rounded away.
+
 Coverage is deliberately kept apart from the discovery ledger. The ledger is
 about what the agent worked out; this is about how much ground it covered. A
 run can score well on one and badly on the other, and those are different
@@ -55,7 +61,8 @@ class Coverage:
         self.rooms_seen: set[int] = set()
         self.objects_seen: set[int] = set()
         self.objects_held: set[int] = set()
-        self.stowed: set[int] = set()      # put inside a container, not carried
+        self.stowed: set[int] = set()      # put inside a container during the run
+        self._parents: dict[int, int] = {}
 
         self.score = 0
         self.max_score = 0
@@ -103,18 +110,32 @@ class Coverage:
         }
         self.objects_held |= held
 
-        # Anything sitting inside something that is neither a room nor the
-        # player. In Zork this is the trophy case; generically it is "stowed".
+        # Things the agent *put* into a container — not things that were
+        # already in one.
+        #
+        # Counting current occupancy reported "3 stowed" on a run that had
+        # never picked anything up, because Zork's leaflet starts inside the
+        # mailbox and the mailbox is a container. What "treasures in the case"
+        # means is a transition: an object whose parent became a container
+        # during the run. So watch parents change rather than reading the
+        # arrangement the game shipped with.
         room_nums = {o.num for o in state.objects if o.parent == self.room_parent}
         for o in state.objects:
-            if (
-                o.name
+            if not o.name:
+                continue
+            was = self._parents.get(o.num)
+            moved_into_container = (
+                was is not None
+                and was != o.parent
                 and o.parent not in room_nums
                 and o.parent != player_object
                 and o.parent != 0
-                and o.num in self.objects_seen
-            ):
+            )
+            if moved_into_container:
                 self.stowed.add(o.num)
+            elif was is not None and was != o.parent:
+                self.stowed.discard(o.num)   # taken back out again
+            self._parents[o.num] = o.parent
 
         self.score = state.score
         self.max_score = state.max_score

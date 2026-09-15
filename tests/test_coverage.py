@@ -87,7 +87,23 @@ class TestCounting:
 
     def test_stowed_counts_things_put_inside_containers(self):
         """The generic form of "treasures in the case"."""
-        assert cover(MOCK_WALKTHROUGH).summary()["stowed"] >= 2
+        assert cover(MOCK_WALKTHROUGH).summary()["stowed"] == 2   # painting, egg
+
+    def test_things_that_started_in_containers_are_not_stowed(self):
+        """Zork's leaflet starts inside the mailbox. Counting current occupancy
+        reported "3 stowed" on a run that had never picked anything up —
+        stowing is a transition the agent caused, not an arrangement it found."""
+        assert cover([]).summary()["stowed"] == 0
+        assert cover(["north", "east", "west"]).summary()["stowed"] == 0
+        assert cover(["open mailbox"]).summary()["stowed"] == 0
+
+    def test_taking_something_back_out_undoes_it(self):
+        stowed = cover(["open mailbox", "take leaflet", "put leaflet in mailbox"]).summary()["stowed"]
+        assert stowed == 1
+        after = cover(
+            ["open mailbox", "take leaflet", "put leaflet in mailbox", "take leaflet"]
+        ).summary()["stowed"]
+        assert after == 0
 
     def test_score_is_reported_as_a_fraction_of_the_maximum(self):
         s = cover(MOCK_WALKTHROUGH).summary()

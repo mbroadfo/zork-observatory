@@ -214,6 +214,12 @@ class Session:
             object_count=len(state.objects),
             tree=build_tree(state.objects),
             coverage=self.coverage.summary(),
+            # Which objects the agent has actually laid eyes on. The tree is
+            # the whole world; without this the front end cannot tell the
+            # difference between "the trophy case holds a painting" and "the
+            # trophy case exists somewhere and holds a painting the agent has
+            # never seen", and it renders a walkthrough instead of a run.
+            seen_objects=sorted(self.coverage.objects_seen),
         )
 
         if any(delta.values()):

@@ -68,6 +68,7 @@ const state = {
   discoveriesSeen: new Set(),
   memory: [],              // lessons the agent kept across rollbacks
   occupied: new Set(),     // "col,row" lattice cells, so rooms never stack
+  showBlocked: false,      // walls are clutter by default; they outnumber edges 2:1
   current: null,
   session: null,
   showThoughts: true,
@@ -176,17 +177,21 @@ const cy = cytoscape({
       },
     },
     {
+      // A wall is news once. After that these are clutter — on a 200-turn run
+      // there were 55 of them against 28 real edges, and they buried the
+      // structure they were meant to annotate. Small, dim, and dismissable.
       selector: "node.blocked",
       style: {
-        "background-color": "#e05c6a",
+        "background-color": "#7d3640",
         shape: "ellipse",
-        width: 7,
-        height: 7,
+        width: 5,
+        height: 5,
         label: "",
         "border-width": 0,
-        opacity: 0.75,
+        opacity: 0.55,
       },
     },
+    { selector: ".hidden-blocked", style: { display: "none" } },
     {
       selector: "edge",
       style: {
@@ -229,6 +234,12 @@ const cy = cytoscape({
 
 $("fit").onclick = () => cy.animate({ fit: { padding: 50 }, duration: 250 });
 
+$("toggle-blocked").onclick = () => {
+  state.showBlocked = !state.showBlocked;
+  $("toggle-blocked").textContent = state.showBlocked ? "hide walls" : "show walls";
+  applyBlockedVisibility();
+};
+
 cy.on("tap", "node.room", (evt) => {
   const d = evt.target.data();
   const blocks = [...state.blocked.values()].filter((b) => b.src === d.id);
@@ -247,11 +258,20 @@ function renderMap() {
   placeAll();
   const seen = new Set();
 
+  // Zork has several rooms called "Forest" and several called "Clearing".
+  // They are genuinely different objects, but identical labels make the map
+  // look wrong rather than dense, so repeats carry their object number.
+  const nameCounts = new Map();
+  for (const room of state.rooms.values()) {
+    nameCounts.set(room.name, (nameCounts.get(room.name) || 0) + 1);
+  }
+
   for (const room of state.rooms.values()) {
     seen.add(room.id);
+    const ambiguous = (nameCounts.get(room.name) || 0) > 1;
     const data = {
       id: room.id,
-      label: room.name,
+      label: ambiguous ? `${room.name} ${room.id}` : room.name,
       dark: room.dark ? 1 : 0,
       deaths: room.deaths || 0,
       visits: room.visits || 1,
@@ -312,7 +332,15 @@ function renderMap() {
 
   cy.$(".room").removeClass("current");
   if (state.current) cy.$id(state.current).addClass("current");
-  $("r-rooms").textContent = state.rooms.size;
+  applyBlockedVisibility();
+  $("m-count").textContent =
+    `${state.rooms.size} rooms · ${state.edges.size} edges · ${state.blocked.size} walls`;
+}
+
+function applyBlockedVisibility() {
+  const hide = !state.showBlocked;
+  cy.$("node.blocked").toggleClass("hidden-blocked", hide);
+  cy.$("edge.blocked-edge").toggleClass("hidden-blocked", hide);
 }
 
 let fitted = false;
@@ -458,6 +486,7 @@ function collectContainers(nodes, depth = 0, room = "") {
         contents: node.children.map((c) => c.name),
       });
     }
+
     if (node.children && node.children.length) {
       out.push(...collectContainers(node.children, depth + 1, here));
     }
@@ -465,24 +494,45 @@ function collectContainers(nodes, depth = 0, room = "") {
   return out;
 }
 
-function renderContainers(tree) {
-  const found = collectContainers(tree);
+/* Only containers the agent has actually seen.
+ *
+ * The object tree is the whole game. Rendering all of it put Zork's troll,
+ * gold coffin and emerald on screen while the agent was still wandering the
+ * forest empty-handed — a panel that reads the same at turn 1 and turn 200 and
+ * amounts to a walkthrough. What is worth watching is the fog lifting, so the
+ * unseen ones are counted, not listed. */
+function renderContainers(tree, seenList) {
+  const all = collectContainers(tree);
+  const seen = new Set(seenList || []);
+  const found = all.filter((c) => seen.has(c.num));
+  const hidden = all.length - found.length;
   const el = $("s-containers");
-  $("c-count").textContent = found.length ? `${found.length}` : "";
+
+  $("c-count").textContent = all.length
+    ? `${found.length} seen${hidden ? ` · ${hidden} not yet` : ""}`
+    : "";
+
   if (!found.length) {
-    el.innerHTML = '<li class="empty">none seen holding anything</li>';
+    el.innerHTML =
+      '<li class="empty">none seen yet' +
+      (hidden ? ` — ${hidden} exist elsewhere in the world` : "") +
+      "</li>";
     return;
   }
-  el.innerHTML = found
-    .map(
-      (c) =>
-        `<li><span class="holder">${escapeHtml(c.name)}</span> ` +
-        `<span class="where">${escapeHtml(c.room)}</span><br>` +
-        `<span class="arrow">└ </span><span class="held">${c.contents
-          .map(escapeHtml)
-          .join(", ")}</span></li>`
-    )
-    .join("");
+  el.innerHTML =
+    found
+      .map(
+        (c) =>
+          `<li><span class="holder">${escapeHtml(c.name)}</span> ` +
+          `<span class="where">${escapeHtml(c.room)}</span><br>` +
+          `<span class="arrow">└ </span><span class="held">${c.contents
+            .map(escapeHtml)
+            .join(", ")}</span></li>`
+      )
+      .join("") +
+    (hidden
+      ? `<li class="empty">+${hidden} more in unvisited parts of the world</li>`
+      : "");
 }
 
 function renderSnapshot(p) {
@@ -496,7 +546,7 @@ function renderSnapshot(p) {
     ? p.inventory.map((i) => `<li>${escapeHtml(i)}</li>`).join("")
     : '<li class="empty">empty-handed</li>';
 
-  renderContainers(p.tree);
+  renderContainers(p.tree, p.seen_objects);
   $("s-tree").innerHTML = renderTree(p.tree) || '<div class="hint">no objects reported</div>';
 
   $("r-score").textContent = p.max_score ? `${p.score} / ${p.max_score}` : p.score;
@@ -617,7 +667,7 @@ function renderQuality(q) {
 
 function renderMemory(lessons) {
   const el = $("s-memory");
-  $("m-count").textContent = lessons && lessons.length ? `${lessons.length}` : "";
+  $("mem-count").textContent = lessons && lessons.length ? `${lessons.length}` : "";
   if (!lessons || !lessons.length) {
     el.innerHTML = '<li class="empty">nothing kept yet</li>';
     return;
