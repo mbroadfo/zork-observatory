@@ -23,37 +23,47 @@ rerun.
 
 ## Quick start
 
+Real Z-machine games run through [Jericho](https://github.com/microsoft/jericho),
+which wraps a modified Frotz and exposes the live object tree, `get_state` /
+`set_state`, and a world-state hash. Jericho ships a compiled Frotz and is
+effectively Linux-only, so the core runs in Docker.
+
+```bash
+# Put a story file in roms/ first — see below.
+docker compose up --build        # → http://127.0.0.1:8000
+```
+
+Or headless:
+
+```bash
+docker build -f docker/Dockerfile -t zork-observatory .
+docker run --rm -v "$PWD/roms:/app/roms:ro" zork-observatory \
+  observatory play --engine jericho --rom roms/zork1.z5 --agent random --turns 150
+```
+
+### Game files
+
+**Not included.** Zork is copyrighted by Activision and is not distributed with
+this project. The research community's reference corpus is the
+[Jericho game suite](https://github.com/BYU-PCCL/z-machine-games), which is what
+essentially every interactive-fiction RL paper benchmarks against; drop a story
+file into `roms/` and point `--rom` at it. Verified against Zork I, Release 88 /
+Serial 840726 (Z-machine v3, 350 points, 246 objects).
+
+### The mock world
+
+`--engine mock` is a small hand-built world. It exists so the pipeline, the
+trace format and the UI can be tested on any OS without a story file or Docker,
+and so CI has something deterministic to run. **It is a test fixture, not a
+benchmark** — no number produced against it means anything about an agent, and
+findings from it must be reconfirmed on a real game. Two bugs that only surfaced
+on first contact with real Zork are recorded in `jericho_engine.py` and
+`discovery.py` as a reminder of exactly how much the fixture hides.
+
 ```bash
 uv venv && uv pip install -e ".[dev]"
-
-# Terminal: watch a scripted run through the built-in test world. No ROM, no API key.
-observatory play --agent scripted --turns 30
-
-# Browser: the full instrument.
-observatory serve          # → http://127.0.0.1:8000
-```
-
-Then pick an engine and an agent in the top bar and press **Run**.
-
-### Playing real games
-
-`MockEngine` is a small hand-built world used for tests and for developing the
-UI. Real Z-machine games run through [Jericho](https://github.com/microsoft/jericho),
-which wraps a modified Frotz and exposes the live object tree, `get_state` /
-`set_state`, and a world-state hash.
-
-Jericho ships a compiled Frotz and is effectively Linux-only:
-
-```bash
-docker compose up --build       # → http://127.0.0.1:8000
-```
-
-Game files are **not** included — Zork is copyrighted. Put your own `.z5` in
-`roms/` (mounted into the container) and select the Jericho engine with that
-path.
-
-```bash
-observatory play --engine jericho --rom roms/zork1.z5 --agent claude --turns 100
+observatory play --agent scripted --turns 30   # no ROM, no API key, no Docker
+pytest
 ```
 
 ### Playing with Claude

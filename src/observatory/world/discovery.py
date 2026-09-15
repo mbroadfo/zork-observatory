@@ -111,6 +111,43 @@ class Turn:
     def errored(self) -> bool:
         return self.unknown_word or self.missing_noun
 
+    def player_object(self) -> int | None:
+        """The player's own object number, inferred from what it carries.
+
+        Jericho exposes the player's *room*, not the player object, but every
+        carried item's parent is the player — so the inventory identifies it
+        without hardcoding anything game-specific.
+        """
+        held = set(self.state.inventory)
+        if not held:
+            return None
+        for o in self.state.objects:
+            if o.name in held:
+                return o.parent
+        return None
+
+    def visible_objects(self) -> set[int]:
+        """Object numbers the player could plausibly perceive this turn.
+
+        Everything inside the current room, at any depth, plus everything the
+        player is carrying. The rest of the object table is the rest of the
+        world, which is running whether the player is watching or not.
+        """
+        children: dict[int, list[int]] = {}
+        for o in self.state.objects:
+            children.setdefault(o.parent, []).append(o.num)
+
+        seen: set[int] = set()
+        frontier = [self.state.location_id]
+        while frontier:
+            num = frontier.pop()
+            for child in children.get(num, []):
+                if child not in seen:
+                    seen.add(child)
+                    frontier.append(child)
+        seen.add(self.state.location_id)
+        return seen
+
 
 @dataclass
 class Discovery:
@@ -210,19 +247,38 @@ def _containers(t: Turn) -> str | None:
 
 @detector("nesting", "Objects contain objects", "The world is a tree, not a flat list.")
 def _nesting(t: Turn) -> str | None:
-    """An object whose parent is itself an object rather than a room."""
+    """An object whose parent is itself an object rather than a room.
+
+    Restricted to what the player could actually have seen. The object tree is
+    the whole world, and in a real game things move in it constantly without
+    the player present — Zork's thief wanders the dungeon from turn one, and an
+    unrestricted version of this detector fired on "thief is inside East-West
+    Passage" before the agent had left the front lawn. The ledger records what
+    the agent's behaviour established, so a detector that reads ground truth
+    the agent has no access to is recording the wrong thing entirely.
+    """
     if not t.prev_state:
         return None
-    object_nums = {o.num for o in t.state.objects}
-    room_ids = {t.state.location_id}
-    if t.prev_state:
-        room_ids.add(t.prev_state.location_id)
+
+    visible = t.visible_objects()
+    if not visible:
+        return None
     prev = {o.num: o.parent for o in t.prev_state.objects}
-    for o in t.state.objects:
-        if o.parent in object_nums and o.parent not in room_ids and prev.get(o.num) != o.parent:
-            parent = next((p.name for p in t.state.objects if p.num == o.parent), "?")
-            if parent and o.name:
-                return f"{o.name} is inside {parent}"
+    by_num = {o.num: o for o in t.state.objects}
+
+    # Being carried is `possession`, a different lesson. Excluding the player
+    # keeps the two categories from both firing on a single `take`.
+    excluded = {t.state.location_id, t.player_object()}
+
+    for num in visible:
+        o = by_num.get(num)
+        if o is None or not o.name:
+            continue
+        # Nested inside another visible object, not the room and not the player.
+        if o.parent in visible and o.parent not in excluded and prev.get(num) != o.parent:
+            parent = by_num.get(o.parent)
+            if parent is not None and parent.name:
+                return f"{o.name} is inside {parent.name}"
     return None
 
 

@@ -85,8 +85,30 @@ class JerichoEngine(GameEngine):
             lost=lost,
         )
 
+    @staticmethod
+    def _attributes(obj: Any) -> list[int]:
+        """Jericho reports attributes as a numpy bool array, not a list.
+
+        Never write `getattr(o, "attr", []) or []` here: `or` forces a truth
+        test, and numpy raises on an array with more than one element. Returns
+        the indices of the set attribute flags, which is the useful form.
+        """
+        attrs = getattr(obj, "attr", None)
+        if attrs is None:
+            return []
+        try:
+            return [i for i, flag in enumerate(attrs) if bool(flag)]
+        except TypeError:
+            return []
+
     def world_state(self) -> WorldState:
         loc = self._safe(lambda: self._env.get_player_location(), None)
+
+        # `or []` is unsafe on anything Jericho returns — several accessors hand
+        # back numpy arrays. Normalise with an explicit None check instead.
+        raw_objects = self._safe(lambda: self._env.get_world_objects(), None)
+        raw_inventory = self._safe(lambda: self._env.get_inventory(), None)
+
         objects = [
             WorldObject(
                 num=int(getattr(o, "num", 0)),
@@ -94,13 +116,16 @@ class JerichoEngine(GameEngine):
                 parent=int(getattr(o, "parent", 0)),
                 child=int(getattr(o, "child", 0)),
                 sibling=int(getattr(o, "sibling", 0)),
-                attributes=list(getattr(o, "attr", []) or []),
+                attributes=self._attributes(o),
             )
-            for o in self._safe(lambda: self._env.get_world_objects(), []) or []
+            for o in (raw_objects if raw_objects is not None else [])
+            # Jericho returns the whole object table, including a long tail of
+            # unused slots with empty names. They are noise in every view.
+            if str(getattr(o, "name", "")).strip()
         ]
         inventory = [
             str(getattr(o, "name", "")).strip()
-            for o in self._safe(lambda: self._env.get_inventory(), []) or []
+            for o in (raw_inventory if raw_inventory is not None else [])
         ]
         text = (self._last_obs or "").lower()
         return WorldState(

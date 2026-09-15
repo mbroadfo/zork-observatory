@@ -24,6 +24,7 @@ from .events import EventBus
 from .trace import TraceWriter
 from .world.discovery import DiscoveryLedger
 from .world.graph import MapGraph
+from .world.outcomes import OutcomeTally
 from .world.objects import build_tree, diff_objects, name_for
 
 
@@ -98,6 +99,7 @@ class Session:
 
         self.map = MapGraph()
         self.ledger = DiscoveryLedger()
+        self.outcomes = OutcomeTally()
         self.transcript: list[tuple[str, str]] = []
         self.checkpoints: dict[str, Checkpoint] = {}
 
@@ -163,6 +165,12 @@ class Session:
         if obs.lost:
             self.map.record_death(room_id)
 
+        # Classify the turn before anything else reads the new state, so the
+        # comparison is against the world as it was when the command was given.
+        outcome = None
+        if command:
+            outcome = self.outcomes.classify(command, obs, state, self._last_state)
+
         self._emit(
             "observation",
             text=obs.text,
@@ -172,6 +180,8 @@ class Session:
             done=obs.done,
             won=obs.won,
             lost=obs.lost,
+            outcome=outcome.to_dict() if outcome else None,
+            quality=self.outcomes.summary() if outcome else None,
         )
 
         changes = diff_objects(self._prev_objects, state.objects)
@@ -482,6 +492,7 @@ class Session:
             max_score=state.max_score if state else 0,
             map=self.map.stats(),
             discoveries=self.ledger.summary(),
+            quality=self.outcomes.summary(),
             usage=self.agent.usage(),
         )
         await self.agent.on_end(reason)
@@ -566,6 +577,7 @@ class Session:
             "inventory": state.inventory if state else [],
             "map": self.map.stats(),
             "discoveries": self.ledger.manifest(),
+            "quality": self.outcomes.summary(),
             "usage": self.agent.usage(),
             "checkpoints": [
                 {

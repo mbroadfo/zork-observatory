@@ -80,10 +80,40 @@ class TestParser:
         assert "boarded" in obs.text
         assert state.location_name == "West of House"
 
-    def test_unknown_word_is_rejected(self):
+    def test_unknown_word_is_rejected_and_named(self):
         engine = MockEngine()
         engine.reset()
-        assert "don't know that word" in engine.step("xyzzy")[0].text
+        text = engine.step("quibbleflarn")[0].text
+
+        assert "don't know the word" in text
+        assert "quibbleflarn" in text        # say which word, as Infocom did
+
+    def test_a_known_verb_with_an_absent_noun_is_a_different_refusal(self):
+        """The most important distinction the parser makes. "I don't know that
+        word" tells an agent its vocabulary is hopeless; "you can't see that"
+        tells it the idea was fine and the object is elsewhere."""
+        engine = MockEngine()
+        engine.reset()
+
+        assert "don't know the word" in engine.step("quibbleflarn mailbox")[0].text
+        assert "can't see any such thing" in engine.step("examine unicorn")[0].text
+
+    def test_a_recognised_verb_on_a_present_object_reports_why_nothing_happened(self):
+        engine = MockEngine()
+        engine.reset()
+
+        assert "won't budge" in engine.step("pull mailbox")[0].text
+        assert "can't eat" in engine.step("eat mailbox")[0].text.replace("is not something you can eat", "can't eat")
+
+    def test_common_verbs_are_understood(self):
+        """These were all "I don't know that word" and made every agent look
+        stupid for trying the most ordinary things a player can try."""
+        engine = MockEngine()
+        engine.reset()
+        for command in ["examine mailbox", "wait", "search mailbox", "push mailbox",
+                        "climb mailbox", "touch mailbox", "listen", "jump",
+                        "x mailbox", "l", "z"]:
+            assert "don't know the word" not in engine.step(command)[0].text, command
 
     def test_taking_moves_the_object_to_the_player(self):
         engine = MockEngine()

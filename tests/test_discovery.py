@@ -64,8 +64,8 @@ class TestDetectorsFire:
         assert run(["open mailbox"]).found["containers"].turn == 1
 
     def test_vocabulary_limit_fires_on_an_unknown_word(self):
-        ledger = run(["xyzzy"])
-        assert "xyzzy" in ledger.found["vocabulary_limit"].evidence
+        ledger = run(["quibbleflarn"])
+        assert "quibbleflarn" in ledger.found["vocabulary_limit"].evidence
 
     def test_reference_failure_is_a_different_lesson_from_vocabulary(self):
         ledger = run(["take lantern"])   # verb known, object absent
@@ -137,6 +137,45 @@ class TestDetectorsStaySilent:
         assert ledger.found["movement"].turn == 1
         assert "reference" not in ledger.found
         assert "vocabulary_limit" not in ledger.found
+
+    def test_nesting_ignores_the_world_the_player_cannot_see(self):
+        """Zork's thief wanders the dungeon from turn one. An unrestricted
+        detector fired on "thief is inside East-West Passage" while the agent
+        was still on the front lawn — recording ground truth the agent had no
+        access to, which is the opposite of what the ledger is for."""
+        from observatory.engine.base import Observation, WorldObject, WorldState
+        from observatory.world.discovery import DiscoveryLedger
+
+        def state(thief_parent: int) -> WorldState:
+            return WorldState(
+                location_id=1,
+                location_name="West of House",
+                objects=[
+                    WorldObject(num=1, name="West of House", parent=0, child=0, sibling=0),
+                    WorldObject(num=2, name="you", parent=1, child=0, sibling=0),
+                    # A room, and a thief in it, on the far side of the map.
+                    WorldObject(num=50, name="East-West Passage", parent=0, child=0, sibling=0),
+                    WorldObject(num=51, name="thief", parent=thief_parent, child=0, sibling=0),
+                ],
+            )
+
+        ledger = DiscoveryLedger()
+        ledger.observe(1, "look", Observation(text="West of House"), state(0), state(0))
+        ledger.observe(2, "look", Observation(text="West of House"), state(50), state(0))
+
+        assert "nesting" not in ledger.found
+
+    def test_nesting_still_fires_for_a_container_in_the_room(self):
+        ledger = run(MOCK_WALKTHROUGH)
+        assert "nesting" in ledger.found
+        assert "trophy case" in ledger.found["nesting"].evidence
+
+    def test_picking_something_up_is_possession_not_nesting(self):
+        """Being carried is a different lesson from being inside something."""
+        ledger = run(["open mailbox", "take leaflet"])
+
+        assert "possession" in ledger.found
+        assert "nesting" not in ledger.found
 
     def test_nothing_fires_on_a_turn_that_did_nothing(self):
         ledger = run(["look"])
@@ -218,7 +257,7 @@ class TestSessionIntegration:
         """The interesting negative case: the instrument must not invent progress."""
         class Mute(ScriptedAgent):
             def __init__(self):
-                super().__init__(["xyzzy"] * 5)
+                super().__init__(["quibbleflarn"] * 5)
 
         bus = EventBus()
         session = Session(

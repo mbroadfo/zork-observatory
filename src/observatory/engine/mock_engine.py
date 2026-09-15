@@ -24,6 +24,64 @@ DIRECTION_ALIASES = {
     "u": "up", "d": "down",
 }
 
+# The parser's vocabulary.
+#
+# This started at eight verbs, which was fine for a test fixture and badly
+# wrong for a world agents are measured in. A real Infocom parser knows well
+# over a hundred verbs, and — this is the part that matters — it *distinguishes*
+# "I don't know that word" from "you can't see that" from "that does nothing".
+# A world that answers every unfamiliar verb with "I don't know that word"
+# teaches an agent that its vocabulary is hopeless rather than that its idea
+# was wrong, and the failure lands on the engine while looking like the agent's.
+VERB_SYNONYMS = {
+    "x": "examine", "l": "look", "i": "inventory", "inv": "inventory",
+    "z": "wait", "get": "take", "grab": "take", "hold": "take",
+    "carry": "take", "hit": "attack", "kill": "attack", "fight": "attack",
+    "strike": "attack", "break": "attack", "smash": "attack",
+    "discard": "drop", "release": "drop", "put down": "drop",
+    "pick up": "take", "look at": "examine", "look in": "search",
+    "look inside": "search", "turn on": "light", "switch on": "light",
+    "turn off": "extinguish", "switch off": "extinguish", "douse": "extinguish",
+    "shut": "close", "peruse": "read", "consume": "eat", "taste": "eat",
+    "sip": "drink", "shove": "push", "tug": "pull", "yank": "pull",
+    "go in": "enter", "go out": "exit", "get out": "exit", "leave": "exit",
+    "walk": "go", "run": "go", "travel": "go", "head": "go",
+}
+
+# Verbs the parser recognises but that mostly just report back. Their value is
+# that they fail *informatively* — "that does nothing" is a fact about the
+# world; "I don't know that word" is a fact about the parser.
+INERT_VERBS = {
+    "wait": "Time passes.",
+    "jump": "You jump on the spot, fooling no one.",
+    "pray": "Nothing happens.",
+    "sing": "Your singing is abominable.",
+    "sleep": "You aren't sleepy.",
+    "listen": "You hear nothing unexpected.",
+    "smell": "You smell nothing unexpected.",
+    "yell": "Aaaarrrrgggghhhh!",
+    "shout": "Aaaarrrrgggghhhh!",
+    "hello": "Nothing happens here.",
+    "xyzzy": "A hollow voice says 'Fool.'",
+    "dig": "You have nothing to dig with.",
+    "swim": "There is no water here.",
+    "fly": "You can't fly.",
+    "count": "You have counted. Well done.",
+}
+
+TRANSITIVE_VERBS = {
+    "take", "drop", "open", "close", "read", "examine", "search", "push",
+    "pull", "move", "turn", "attack", "eat", "drink", "climb", "throw",
+    "wear", "touch", "knock", "light", "extinguish", "lock", "unlock",
+    "enter", "put", "insert", "tie", "burn", "fill", "empty",
+}
+
+KNOWN_VERBS = (
+    TRANSITIVE_VERBS
+    | set(INERT_VERBS)
+    | {"look", "inventory", "score", "go", "exit", "save", "restore", "quit", "version"}
+)
+
 
 @dataclass
 class Room:
@@ -291,51 +349,181 @@ class MockEngine(GameEngine):
                 return t
         return None
 
+    @staticmethod
+    def _split(raw: str) -> tuple[str, str]:
+        """Pull the verb off the front, honouring two-word verbs."""
+        for phrase in sorted(VERB_SYNONYMS, key=len, reverse=True):
+            if " " in phrase and (raw == phrase or raw.startswith(phrase + " ")):
+                return VERB_SYNONYMS[phrase], raw[len(phrase):].strip()
+        verb, _, rest = raw.partition(" ")
+        return VERB_SYNONYMS.get(verb, verb), rest.strip()
+
     def _dispatch(self, raw: str) -> str:
-        word = DIRECTION_ALIASES.get(raw, raw)
         room = self._rooms[self._here]
 
+        # Bare directions.
+        word = DIRECTION_ALIASES.get(raw, raw)
         if word in ("north", "south", "east", "west", "up", "down", "in", "out",
                     "northeast", "northwest", "southeast", "southwest"):
             return self._go(word, room)
-        if raw.startswith("go "):
-            return self._go(DIRECTION_ALIASES.get(raw[3:], raw[3:]), room)
 
-        if raw in ("look", "l"):
+        verb, rest = self._split(raw)
+        noun = rest.removeprefix("the ").removeprefix("a ").strip()
+
+        if verb == "go":
+            target = DIRECTION_ALIASES.get(noun, noun)
+            if not target:
+                return "Go where?"
+            return self._go(target, room)
+
+        if verb not in KNOWN_VERBS:
+            return f'I don\'t know the word "{verb}".'
+
+        if verb in INERT_VERBS and not noun:
+            return INERT_VERBS[verb]
+
+        if verb == "look":
+            if noun:
+                return self._examine(noun)
             return self._describe_room()
-        if raw in ("inventory", "i"):
+        if verb == "inventory":
             inv = self._inventory()
             if not inv:
                 return "You are empty-handed."
             return "You are carrying:\n" + "\n".join(f"  A {t.name}" for t in inv)
-        if raw in ("turn on lantern", "turn on lamp", "light lamp", "turn on brass lantern"):
-            lamp = self._things[104]
-            if not self._holding(lamp):
-                return "You don't have the lantern."
-            self._lamp_on = True
-            return "The brass lantern is now on."
-        if raw in ("turn off lantern", "turn off lamp"):
-            self._lamp_on = False
-            return "The brass lantern is now off."
-
-        if raw.startswith(("take ", "get ", "pick up ")):
-            return self._take(raw.split(" ", 1)[1].removeprefix("up "))
-        if raw.startswith("drop "):
-            return self._drop(raw[5:])
-        if raw.startswith("open "):
-            return self._open(raw[5:])
-        if raw.startswith("read "):
-            t = self._find(raw[5:], self._visible_here() + self._inventory())
-            if t is None:
-                return "You can't see that here."
-            return t.text or f"There's nothing written on the {t.name}."
-        if raw.startswith("put ") and " in " in raw:
-            item, _, dest = raw[4:].partition(" in ")
-            return self._put(item, dest)
-        if raw in ("score",):
+        if verb == "score":
             return f"Your score is {self._score} of a possible {MAX_SCORE}, in {self._moves} moves."
+        if verb == "exit":
+            return self._go("out", room)
+        if verb == "enter" and not noun:
+            return self._go("in", room)
+        if verb in ("save", "restore", "quit", "version"):
+            # The session intercepts save/restore when the agent is allowed
+            # them. Reaching here means it isn't, so say so plainly rather than
+            # pretending the word is unknown.
+            return f"{verb.capitalize()} is not available in this world."
 
-        return "I don't know that word."
+        # Everything below needs something to act on.
+        if verb in TRANSITIVE_VERBS and not noun:
+            return f"What do you want to {verb}?"
+
+        if verb == "take":
+            return self._take(noun)
+        if verb == "drop":
+            return self._drop(noun)
+        if verb == "open":
+            return self._open(noun)
+        if verb == "close":
+            return self._close(noun)
+        if verb == "examine":
+            return self._examine(noun)
+        if verb == "search":
+            return self._search(noun)
+        if verb == "read":
+            t = self._resolve(noun)
+            if isinstance(t, str):
+                return t
+            return t.text or f"There's nothing written on the {t.name}."
+        if verb == "light":
+            return self._light(noun, on=True)
+        if verb == "extinguish":
+            return self._light(noun, on=False)
+        if verb in ("put", "insert"):
+            for sep in (" in ", " into ", " on "):
+                if sep in rest:
+                    item, _, dest = rest.partition(sep)
+                    return self._put(item.strip(), dest.strip())
+            return f"What do you want to put the {noun} in?"
+        if verb == "enter":
+            return self._go("in", room)
+
+        # Recognised verb, recognised object, nothing to do. This is the most
+        # useful failure a parser can produce: the idea was understood and
+        # rejected, which is information the agent can act on.
+        t = self._resolve(noun)
+        if isinstance(t, str):
+            return t
+        return {
+            "push": f"Pushing the {t.name} doesn't do anything.",
+            "pull": f"The {t.name} won't budge.",
+            "move": f"Moving the {t.name} reveals nothing.",
+            "turn": f"The {t.name} won't turn.",
+            "attack": f"Attacking the {t.name} accomplishes little.",
+            "eat": f"The {t.name} is not something you can eat.",
+            "drink": f"The {t.name} is not something you can drink.",
+            "climb": f"You can't climb the {t.name}.",
+            "throw": f"Throwing the {t.name} would be pointless.",
+            "wear": f"You can't wear the {t.name}.",
+            "touch": f"Touching the {t.name} tells you nothing.",
+            "knock": f"Nobody answers at the {t.name}.",
+            "lock": f"The {t.name} has no lock.",
+            "unlock": f"The {t.name} has no lock.",
+            "tie": f"You can't tie the {t.name} to anything.",
+            "burn": f"You have nothing to burn the {t.name} with.",
+            "fill": f"You can't fill the {t.name}.",
+            "empty": f"The {t.name} is not something you can empty.",
+        }.get(verb, f"You can't do that to the {t.name}.")
+
+    def _resolve(self, phrase: str) -> "Thing | str":
+        """Find a visible object, or return the refusal to print."""
+        if not self._lit():
+            return "It's too dark to see."
+        t = self._find(phrase, self._visible_here() + self._inventory())
+        if t is None:
+            return "You can't see any such thing."
+        return t
+
+    def _examine(self, phrase: str) -> str:
+        t = self._resolve(phrase)
+        if isinstance(t, str):
+            return t
+        extra = ""
+        if t.container:
+            inside = [x.name for x in self._things.values() if x.location == t.id]
+            if not t.is_open:
+                extra = f" The {t.name} is closed."
+            elif inside:
+                extra = f" It contains: {', '.join(inside)}."
+            else:
+                extra = f" The {t.name} is empty."
+        if t.id == 104:
+            extra += " It is currently " + ("on." if self._lamp_on else "off.")
+        return t.description + extra
+
+    def _search(self, phrase: str) -> str:
+        t = self._resolve(phrase)
+        if isinstance(t, str):
+            return t
+        if not t.container:
+            return f"You find nothing of interest in the {t.name}."
+        if not t.is_open:
+            return f"The {t.name} is closed."
+        inside = [x.name for x in self._things.values() if x.location == t.id]
+        if inside:
+            return f"The {t.name} contains: {', '.join(inside)}."
+        return f"The {t.name} is empty."
+
+    def _close(self, phrase: str) -> str:
+        t = self._resolve(phrase)
+        if isinstance(t, str):
+            return t
+        if not t.container:
+            return f"You can't close the {t.name}."
+        if not t.is_open:
+            return f"The {t.name} is already closed."
+        t.is_open = False
+        return "Closed."
+
+    def _light(self, phrase: str, on: bool) -> str:
+        t = self._find(phrase, self._visible_here() + self._inventory())
+        if t is None:
+            return "You can't see any such thing."
+        if t.id != 104:
+            return f"The {t.name} is not a light source."
+        if on and not self._holding(t):
+            return f"You aren't holding the {t.name}."
+        self._lamp_on = on
+        return f"The {t.name} is now {'on' if on else 'off'}."
 
     def _go(self, direction: str, room: Room) -> str:
         if direction in room.blocked:

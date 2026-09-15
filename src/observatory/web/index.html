@@ -121,8 +121,29 @@
       </div>
 
       <div class="section">
-        <h3>Carrying</h3>
+        <h3>Carrying <span id="inv-count" class="count-inline"></span></h3>
         <ul class="plain" id="s-inventory"><li class="empty">empty-handed</li></ul>
+      </div>
+
+      <div class="section">
+        <h3>Containers <span id="c-count" class="count-inline"></span></h3>
+        <div class="hint" style="margin-bottom:6px">anything in the world holding something else</div>
+        <ul class="plain containers" id="s-containers"><li class="empty">none seen</li></ul>
+      </div>
+
+      <div class="section">
+        <h3>Turn quality</h3>
+        <div class="headline" id="q-headline">
+          <b>—</b> wasted &nbsp;·&nbsp; <b>—</b> futile
+        </div>
+        <div class="quality-bar" id="q-bar"></div>
+        <div class="quality-key" id="q-key"></div>
+        <div class="kv" style="margin-top:6px">
+          <span class="k">distinct commands</span><span class="v" id="q-distinct">0</span>
+        </div>
+        <div class="kv">
+          <span class="k">known dead ends</span><span class="v" id="q-deadends">0</span>
+        </div>
       </div>
 
       <div class="section">

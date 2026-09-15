@@ -74,6 +74,11 @@ async def _play(args: argparse.Namespace) -> int:
             print(f"=== {p['reason']} — score {p['final_score']}/{p['max_score']} "
                   f"in {p['turns']} turns, {p.get('deaths', 0)} death(s) ==={censored}")
             print(f"    map: {p['map']}")
+            q = p["quality"]
+            print(f"    turns: {q['wasted_pct']}% wasted, {q['futile_pct']}% futile "
+                  f"(already tried and already failed in that same room) · "
+                  f"{q['distinct_commands']} distinct commands, {q['known_dead_ends']} known dead ends")
+            print(f"           {q['counts']}")
             d = p["discoveries"]
             # Reported against `step`, which rollbacks don't rewind.
             print(f"    discovered {d['found']}/{d['total']} over {p['steps']} steps: "

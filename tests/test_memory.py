@@ -278,4 +278,4 @@ class TestAgentInvokedSaveRestore:
         await session.step_once()
 
         assert session._agent_save is None
-        assert "don't know that word" in session.transcript[-1][1].lower()
+        assert "not available" in session.transcript[-1][1].lower()

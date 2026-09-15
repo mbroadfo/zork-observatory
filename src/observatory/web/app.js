@@ -360,13 +360,37 @@ function addThought(text, meta) {
   append(el);
 }
 
-function addEntry(command, response, kind) {
+const OUTCOME_LABEL = {
+  progress: "",
+  blocked: "no way through",
+  unknown: "not a word it knows",
+  absent: "not here",
+  inert: "nothing happened",
+  meta: "",
+  futile: "↻ tried here before",
+};
+
+function addEntry(command, response, kind, outcome) {
   const el = document.createElement("div");
   el.className = "entry";
+  if (outcome) {
+    el.classList.add(
+      outcome.outcome === "futile" ? "futile" : outcome.wasted ? "wasted" : "progress"
+    );
+  }
   if (command) {
     const c = document.createElement("div");
     c.className = "cmd";
     c.textContent = `> ${command}`;
+    if (outcome && OUTCOME_LABEL[outcome.outcome]) {
+      const tag = document.createElement("span");
+      tag.className = "tag";
+      tag.textContent =
+        outcome.outcome === "futile" && outcome.repeat_count > 1
+          ? `${OUTCOME_LABEL.futile} ×${outcome.repeat_count}`
+          : OUTCOME_LABEL[outcome.outcome];
+      c.appendChild(tag);
+    }
     el.appendChild(c);
   }
   const r = document.createElement("div");
@@ -414,16 +438,65 @@ function escapeHtml(s) {
   );
 }
 
+/* Every object in the world that is holding something else.
+ *
+ * Derived from the object tree rather than named explicitly, so this works on
+ * any game the engine can load — the trophy case is not special-cased, it just
+ * happens to be a container with things in it. Rooms are skipped (everything
+ * is "in" a room) and so is the player, whose contents are the Carrying list. */
+function collectContainers(nodes, depth = 0, room = "") {
+  const out = [];
+  for (const node of nodes || []) {
+    const here = depth === 0 ? node.name : room;
+    const isRoom = depth === 0;
+    const isPlayer = node.name === "you";
+    if (!isRoom && !isPlayer && node.children && node.children.length) {
+      out.push({
+        name: node.name,
+        num: node.num,
+        room: here,
+        contents: node.children.map((c) => c.name),
+      });
+    }
+    if (node.children && node.children.length) {
+      out.push(...collectContainers(node.children, depth + 1, here));
+    }
+  }
+  return out;
+}
+
+function renderContainers(tree) {
+  const found = collectContainers(tree);
+  const el = $("s-containers");
+  $("c-count").textContent = found.length ? `${found.length}` : "";
+  if (!found.length) {
+    el.innerHTML = '<li class="empty">none seen holding anything</li>';
+    return;
+  }
+  el.innerHTML = found
+    .map(
+      (c) =>
+        `<li><span class="holder">${escapeHtml(c.name)}</span> ` +
+        `<span class="where">${escapeHtml(c.room)}</span><br>` +
+        `<span class="arrow">└ </span><span class="held">${c.contents
+          .map(escapeHtml)
+          .join(", ")}</span></li>`
+    )
+    .join("");
+}
+
 function renderSnapshot(p) {
   $("s-room").textContent = `${p.location_name} (#${p.location_id})`;
   $("s-hash").textContent = p.state_hash ? p.state_hash.slice(0, 16) : "—";
   $("s-objects").textContent = p.object_count;
 
   const inv = $("s-inventory");
+  $("inv-count").textContent = p.inventory.length ? `${p.inventory.length}` : "";
   inv.innerHTML = p.inventory.length
     ? p.inventory.map((i) => `<li>${escapeHtml(i)}</li>`).join("")
     : '<li class="empty">empty-handed</li>';
 
+  renderContainers(p.tree);
   $("s-tree").innerHTML = renderTree(p.tree) || '<div class="hint">no objects reported</div>';
 
   $("r-score").textContent = p.max_score ? `${p.score} / ${p.max_score}` : p.score;
@@ -479,6 +552,40 @@ function renderDiscoveries(manifest) {
       );
     })
     .join("");
+}
+
+const QUALITY_ORDER = [
+  ["progress", "productive"],
+  ["blocked", "no way through"],
+  ["unknown", "word unknown"],
+  ["absent", "not here"],
+  ["inert", "no effect"],
+  ["meta", "meta"],
+  ["futile", "futile"],
+];
+
+function renderQuality(q) {
+  if (!q || !q.steps) return;
+
+  // Waste is the price of exploring. Futility is the price of not listening —
+  // so it gets the loud number, and only it turns red.
+  $("q-headline").innerHTML =
+    `<b>${q.wasted_pct}%</b> wasted &nbsp;·&nbsp; ` +
+    `<b class="${q.futile_pct > 10 ? "bad" : ""}">${q.futile_pct}%</b> futile`;
+
+  const bar = $("q-bar");
+  bar.innerHTML = QUALITY_ORDER.map(([key]) => {
+    const n = q.counts[key] || 0;
+    if (!n) return "";
+    return `<span class="q-${key}" style="width:${(n / q.steps) * 100}%" title="${key}: ${n}"></span>`;
+  }).join("");
+
+  $("q-key").innerHTML = QUALITY_ORDER.filter(([key]) => q.counts[key])
+    .map(([key, label]) => `<span><i class="q-${key}"></i>${label} ${q.counts[key]}</span>`)
+    .join("");
+
+  $("q-distinct").textContent = q.distinct_commands;
+  $("q-deadends").textContent = q.known_dead_ends;
 }
 
 function renderMemory(lessons) {
@@ -568,8 +675,9 @@ function handle(event) {
 
     case "observation": {
       const kind = p.lost ? "death" : p.won ? "win" : "";
-      addEntry(state.pendingThought, p.text, kind);
+      addEntry(state.pendingThought, p.text, kind, p.outcome);
       state.pendingThought = null;
+      if (p.quality) renderQuality(p.quality);
       break;
     }
 
@@ -676,6 +784,14 @@ function resetView() {
   renderDiscoveries([]);
   renderMemory([]);
   $("r-deaths").textContent = "0";
+  $("q-headline").innerHTML = "<b>—</b> wasted &nbsp;·&nbsp; <b>—</b> futile";
+  $("q-bar").innerHTML = "";
+  $("q-key").innerHTML = "";
+  $("q-distinct").textContent = "0";
+  $("q-deadends").textContent = "0";
+  $("s-containers").innerHTML = '<li class="empty">none seen</li>';
+  $("c-count").textContent = "";
+  $("inv-count").textContent = "";
   state.current = null;
   costTotal = 0;
   entryCount = 0;
@@ -763,6 +879,7 @@ function applySummary(s) {
 
   if ((s.memory || []).length >= state.memory.length) state.memory = s.memory || [];
   renderMemory(state.memory);
+  renderQuality(s.quality);
   $("r-deaths").textContent = s.deaths || 0;
   if (s.usage && s.usage.cost_usd) {
     costTotal = s.usage.cost_usd;

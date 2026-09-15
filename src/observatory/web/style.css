@@ -185,6 +185,25 @@ main {
   margin-bottom: 2px;
 }
 .entry .resp { white-space: pre-wrap; word-break: break-word; }
+
+/* Waste should be visible while scrolling, not only in a summary.
+   A productive turn gets a quiet green tick; a wasted one goes grey and
+   recedes; a futile one — already tried here, already seen fail — is marked
+   loudly, because that is the only category the agent had been told about. */
+.entry { border-left: 2px solid transparent; padding-left: 8px; margin-left: -10px; }
+.entry.progress { border-left-color: var(--green); }
+.entry.wasted { border-left-color: var(--line); opacity: .62; }
+.entry.futile { border-left-color: var(--red); opacity: 1; }
+.entry .tag {
+  display: inline-block;
+  margin-left: 7px;
+  font-size: 9.5px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--dimmer);
+  vertical-align: 1px;
+}
+.entry.futile .tag { color: var(--red); }
 .entry .resp.death { color: var(--red); }
 .entry .resp.win { color: var(--green); }
 
@@ -276,6 +295,13 @@ ul.plain { list-style: none; margin: 0; padding: 0; font-size: 12px; }
 ul.plain li { padding: 1px 0; }
 ul.plain li.empty { color: var(--dimmer); font-style: italic; }
 
+ul.containers li { padding: 3px 0; border-bottom: 1px solid var(--line-soft); }
+ul.containers li:last-child { border-bottom: none; }
+ul.containers .holder { color: var(--text); }
+ul.containers .held { color: var(--cyan); }
+ul.containers .where { color: var(--dimmer); font-size: 10px; }
+ul.containers .arrow { color: var(--dimmer); }
+
 .tree { font-size: 11.5px; }
 .tree details { margin-left: 9px; }
 .tree summary { cursor: pointer; padding: 1px 0; color: var(--text); }
@@ -306,6 +332,35 @@ ul.plain li.empty { color: var(--dimmer); font-style: italic; }
 .hint { color: var(--dimmer); font-size: 11px; font-style: italic; }
 
 .count-inline { color: var(--dimmer); font-weight: 400; letter-spacing: 0; }
+
+/* Turn quality: one bar, proportional, so the shape reads before the numbers do. */
+.quality-bar {
+  display: flex;
+  height: 7px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--line);
+  margin: 4px 0 8px;
+}
+.quality-bar > span { height: 100%; transition: width .4s ease; }
+
+/* Defined unscoped so the legend swatches reuse the same colours. */
+.q-progress { background: var(--green); }
+.q-blocked  { background: #3d4d6b; }
+.q-unknown  { background: #56435e; }
+.q-absent   { background: #4a4258; }
+.q-inert    { background: #2c3446; }
+.q-meta     { background: #38465e; }
+.q-futile   { background: var(--red); }
+
+.quality-key { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 10.5px; color: var(--dim); }
+.quality-key span i {
+  display: inline-block; width: 8px; height: 8px; border-radius: 2px;
+  margin-right: 5px; vertical-align: -1px;
+}
+.headline { font-size: 12px; }
+.headline b { font-size: 15px; font-variant-numeric: tabular-nums; }
+.headline .bad { color: var(--red); }
 
 /* Lessons are the agent's own words — set them apart from harness text. */
 ol.memory { list-style: none; margin: 0; padding: 0; font-size: 11.5px; }

@@ -10,7 +10,10 @@ from __future__ import annotations
 import asyncio
 import random
 
+from ..world.discovery import ERROR_REPLY_MAX_CHARS, NO_SUCH_THING, UNKNOWN_WORD
 from .base import Agent, AgentAction, TurnContext
+
+REFUSALS = UNKNOWN_WORD + NO_SUCH_THING + ("you can't go that way",)
 
 DIRECTIONS = [
     "north", "south", "east", "west", "northeast", "northwest",
@@ -32,6 +35,10 @@ TRANSITIVE = {
 }
 
 # Words that appear in prose but are never the noun you want.
+#
+# This includes common verbs, because room descriptions are full of them —
+# "A table HOLDS an elongated brown sack" was putting "holds" into the noun
+# pool, and `search holds` is not a command any player would type.
 STOPWORDS = frozenset("""
 a an the this that these those there here is are was were be been being am
 you your yours i me my mine it its he she they them we us of in on at to from
@@ -41,7 +48,25 @@ which who whom whose what when where why how all any both each few more most
 other some such only own same s t just now up down out off over under again
 further once into through during before after above below between about against
 standing seeing looking appears seems something anything nothing everything
+holds held hold contains contain containing leads leading lead goes going gone
+sits sitting sat lies lying lay stands stood seems seem appear appeared reveals
+revealing reveal opened opening closed closing taken taking dropped know knows
+known see saw seen look looks looked walk walked walking cant wont dont isnt
+arent couldnt wouldnt havent hasnt slightly small large elongated narrow open
+closed empty full one two three several very quite rather almost already
 """.split())
+
+# Word shapes that are never a noun in an object name.
+def _is_noun_shaped(word: str) -> bool:
+    if len(word) <= 2 or word in STOPWORDS:
+        return False
+    if "'" in word:           # contractions: don't, can't, isn't
+        return False
+    if word.endswith("ly"):   # adverbs: slightly, securely
+        return False
+    if word.endswith("ing") and word[:-3] in STOPWORDS:
+        return False
+    return True
 
 
 class RandomAgent(Agent):
@@ -68,17 +93,29 @@ class RandomAgent(Agent):
         self._seen: set[str] = set()
 
     def _harvest(self, text: str) -> None:
-        """Collect candidate nouns from whatever the game just printed."""
+        """Collect candidate nouns from whatever the game just printed.
+
+        Parser refusals are skipped. "I don't know that word" is the machine
+        talking about itself, not a description of the world — harvesting it
+        put "don't" into the pool and produced `open don't`, an agent learning
+        its vocabulary from the error messages its own bad vocabulary caused.
+        """
+        lowered = text.strip().lower()
+        if len(lowered) <= ERROR_REPLY_MAX_CHARS and any(
+            p in lowered for p in REFUSALS
+        ):
+            return
+
         word = ""
-        for ch in text.lower():
+        for ch in lowered:
             if ch.isalpha() or ch == "'":
                 word += ch
                 continue
-            if len(word) > 2 and word not in STOPWORDS and word not in self._seen:
+            if _is_noun_shaped(word) and word not in self._seen:
                 self._seen.add(word)
                 self._nouns.append(word)
             word = ""
-        if len(word) > 2 and word not in STOPWORDS and word not in self._seen:
+        if _is_noun_shaped(word) and word not in self._seen:
             self._seen.add(word)
             self._nouns.append(word)
 
