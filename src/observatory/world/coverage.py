@@ -64,10 +64,48 @@ class Coverage:
         self.stowed: set[int] = set()      # put inside a container during the run
         self._parents: dict[int, int] = {}
 
+        # Containers whose insides the agent has actually been shown.
+        #
+        # A container is just an object with a state, and until it has been
+        # opened its contents are not the agent's knowledge — they are the
+        # game's. Listing them anyway is the same foreshadowing as tracking a
+        # thief the agent has never met.
+        self.opened: set[int] = set()
+
         self.score = 0
         self.max_score = 0
 
-    def observe(self, state: WorldState, visible: set[int], player_object: int | None) -> None:
+    OPENING_VERBS = ("open ", "search ", "look in ", "look inside ", "unlock ")
+
+    def _note_opening(self, command: str, text: str, state: WorldState, visible: set[int]) -> None:
+        """Mark a container opened when the agent opened it and the game agreed."""
+        cmd = command.strip().lower()
+        for verb in self.OPENING_VERBS:
+            if not cmd.startswith(verb):
+                continue
+            lowered = text.lower()
+            if "can't" in lowered or "cannot" in lowered or "don't know" in lowered:
+                return
+            phrase = {w for w in cmd[len(verb):].split() if len(w) > 2}
+            if not phrase:
+                return
+            for o in state.objects:
+                if o.num in visible and o.name and phrase & set(o.name.lower().split()):
+                    self.opened.add(o.num)
+                    return
+            return
+
+    def observe(
+        self,
+        state: WorldState,
+        visible: set[int],
+        player_object: int | None,
+        command: str = "",
+        text: str = "",
+    ) -> None:
+        if command:
+            self._note_opening(command, text, state, visible)
+
         if player_object is not None:
             self.player_object = player_object
         elif self.player_object is None and state.location_id:

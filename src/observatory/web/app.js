@@ -392,6 +392,7 @@ const OUTCOME_LABEL = {
   progress: "",
   blocked: "no way through",
   unknown: "not a word it knows",
+  grammar: "didn't parse",
   absent: "not here",
   inert: "nothing happened",
   meta: "",
@@ -501,9 +502,10 @@ function collectContainers(nodes, depth = 0, room = "") {
  * forest empty-handed — a panel that reads the same at turn 1 and turn 200 and
  * amounts to a walkthrough. What is worth watching is the fog lifting, so the
  * unseen ones are counted, not listed. */
-function renderContainers(tree, seenList) {
+function renderContainers(tree, seenList, openedList) {
   const all = collectContainers(tree);
   const seen = new Set(seenList || []);
+  const opened = new Set(openedList || []);
   const found = all.filter((c) => seen.has(c.num));
   const hidden = all.length - found.length;
   const el = $("s-containers");
@@ -515,39 +517,70 @@ function renderContainers(tree, seenList) {
   if (!found.length) {
     el.innerHTML =
       '<li class="empty">none seen yet' +
-      (hidden ? ` — ${hidden} exist elsewhere in the world` : "") +
+      (hidden ? ` — ${hidden} elsewhere in the world` : "") +
       "</li>";
     return;
   }
+
+  // A container is an object with a state, and what is inside a closed one is
+  // the game's knowledge, not the agent's. Listing the contents of a mailbox
+  // nobody opened is the same foreshadowing as tracking a thief nobody met.
   el.innerHTML =
     found
-      .map(
-        (c) =>
-          `<li><span class="holder">${escapeHtml(c.name)}</span> ` +
-          `<span class="where">${escapeHtml(c.room)}</span><br>` +
-          `<span class="arrow">└ </span><span class="held">${c.contents
-            .map(escapeHtml)
-            .join(", ")}</span></li>`
-      )
+      .map((c) => {
+        const isOpen = opened.has(c.num);
+        const state = isOpen
+          ? '<span class="cstate open">open</span>'
+          : '<span class="cstate">not opened</span>';
+        const body = isOpen
+          ? `<span class="arrow">└ </span><span class="held">${c.contents
+              .map(escapeHtml)
+              .join(", ")}</span>`
+          : '<span class="arrow">└ </span><span class="unknown">contents unknown</span>';
+        return (
+          `<li><span class="holder">${escapeHtml(c.name)}</span> ${state} ` +
+          `<span class="where">${escapeHtml(c.room)}</span><br>${body}</li>`
+        );
+      })
       .join("") +
-    (hidden
-      ? `<li class="empty">+${hidden} more in unvisited parts of the world</li>`
-      : "");
+    (hidden ? `<li class="empty">+${hidden} in unvisited parts of the world</li>` : "");
+}
+
+/* The parser's vocabulary as the agent has mapped it.
+ *
+ * Replaces a "distinct commands" count, which rewarded an agent for inventing
+ * words: `take lazuli`, `take grue` and `take zorkmid` are three distinct
+ * commands and zero knowledge. What the parser turned out to know is the
+ * thing worth watching, and the rejected sets are the boundary being probed. */
+function renderVocabulary(v) {
+  if (!v) return;
+  $("v-count").textContent = `${v.verbs_ok_n} verbs · ${v.nouns_ok_n} nouns`;
+
+  const row = (label, words, cls) =>
+    `<div class="vrow"><div class="vlabel">${label} <b>${words.length}</b></div>` +
+    (words.length
+      ? `<div class="vwords ${cls}">${words.map(escapeHtml).join(" ")}</div>`
+      : '<div class="vwords empty">—</div>') +
+    "</div>";
+
+  // The two refusals mean opposite things and are kept apart: "not a word"
+  // closes a door, "not here" says the object exists somewhere else.
+  $("vocab").innerHTML =
+    row("verbs that work", v.verbs_ok, "ok") +
+    row("nouns that resolved", v.nouns_ok, "ok") +
+    row("not in its dictionary", v.unknown, "bad") +
+    row("real, but not here", v.absent, "warn");
 }
 
 function renderSnapshot(p) {
-  $("s-room").textContent = `${p.location_name} (#${p.location_id})`;
-  $("s-hash").textContent = p.state_hash ? p.state_hash.slice(0, 16) : "—";
-  $("s-objects").textContent = p.object_count;
-
   const inv = $("s-inventory");
   $("inv-count").textContent = p.inventory.length ? `${p.inventory.length}` : "";
   inv.innerHTML = p.inventory.length
     ? p.inventory.map((i) => `<li>${escapeHtml(i)}</li>`).join("")
     : '<li class="empty">empty-handed</li>';
 
-  renderContainers(p.tree, p.seen_objects);
-  $("s-tree").innerHTML = renderTree(p.tree) || '<div class="hint">no objects reported</div>';
+  renderContainers(p.tree, p.seen_objects, p.opened_containers);
+  renderVocabulary(p.vocabulary);
 
   $("r-score").textContent = p.max_score ? `${p.score} / ${p.max_score}` : p.score;
   $("r-gauge").style.width = p.max_score ? `${(p.score / p.max_score) * 100}%` : "0%";
@@ -624,17 +657,14 @@ function renderCoverage(c) {
       </div>`
       )
       .join("") +
-    `<div class="kv"><span class="k">objects ever held</span><span class="v">${c.objects_held}</span></div>` +
     `<div class="kv"><span class="k">stowed in containers</span><span class="v">${c.stowed}</span></div>`;
-
-  // The header reads better with the denominator once we know it.
-  $("r-rooms").textContent = c.rooms_total ? `${c.rooms_seen}/${c.rooms_total}` : c.rooms_seen;
 }
 
 const QUALITY_ORDER = [
   ["progress", "productive"],
   ["blocked", "no way through"],
   ["unknown", "word unknown"],
+  ["grammar", "didn't parse"],
   ["absent", "not here"],
   ["inert", "no effect"],
   ["meta", "meta"],
@@ -661,7 +691,6 @@ function renderQuality(q) {
     .map(([key, label]) => `<span><i class="q-${key}"></i>${label} ${q.counts[key]}</span>`)
     .join("");
 
-  $("q-distinct").textContent = q.distinct_commands;
   $("q-deadends").textContent = q.known_dead_ends;
 }
 
@@ -865,7 +894,6 @@ function resetView() {
   $("q-headline").innerHTML = "<b>—</b> wasted &nbsp;·&nbsp; <b>—</b> futile";
   $("q-bar").innerHTML = "";
   $("q-key").innerHTML = "";
-  $("q-distinct").textContent = "0";
   $("q-deadends").textContent = "0";
   $("cov-rows").innerHTML = "";
   $("s-containers").innerHTML = '<li class="empty">none seen</li>';
@@ -879,7 +907,6 @@ function resetView() {
   transcript.innerHTML = "";
   $("r-cost").textContent = "$0.00";
   $("r-turn").textContent = "0";
-  $("r-rooms").textContent = "0";
   $("s-delta").innerHTML = '<div class="hint">nothing yet</div>';
 }
 

@@ -26,7 +26,10 @@ def cover(commands: list[str]) -> Coverage:
             turn=0, command=command, obs=obs, state=state, prev_state=prev,
             visited_rooms=set(), commands_seen=set(),
         )
-        coverage.observe(state, probe.visible_objects(), probe.player_object())
+        coverage.observe(
+            state, probe.visible_objects(), probe.player_object(),
+            command=command, text=obs.text,
+        )
         prev = state
     return coverage
 
@@ -111,6 +114,35 @@ class TestCounting:
 
     def test_an_unstarted_run_does_not_divide_by_zero(self):
         assert Coverage().summary()["rooms_pct"] == 0.0
+
+
+class TestContainersAreObjectsWithAState:
+    """What is inside a closed container is the game's knowledge, not the
+    agent's. Listing it is the same foreshadowing as tracking an unmet thief."""
+
+    def test_a_container_starts_unopened(self):
+        assert cover([]).opened == set()
+
+    def test_opening_one_records_it(self):
+        coverage = cover(["open mailbox"])
+        assert coverage.opened, "the mailbox should be marked opened"
+
+    def test_searching_counts_as_opening(self):
+        assert cover(["open mailbox", "search mailbox"]).opened
+
+    def test_a_refused_open_does_not_count(self):
+        assert cover(["open unicorn"]).opened == set()
+        assert cover(["open quibbleflarn"]).opened == set()
+
+    def test_opening_something_elsewhere_does_not_leak(self):
+        """The trophy case is two rooms away and has never been touched."""
+        coverage = cover(["open mailbox"])
+        case = next(
+            (o.num for o in MockEngine().world_state().objects if o.name == "trophy case"),
+            None,
+        )
+        assert case is not None
+        assert case not in coverage.opened
 
 
 class TestSessionIntegration:

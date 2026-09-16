@@ -68,7 +68,6 @@
       <div class="gauge"><div id="r-gauge"></div></div>
     </div>
     <div class="readout"><span class="label">Turn</span><span class="value" id="r-turn">0</span></div>
-    <div class="readout"><span class="label">Rooms</span><span class="value cyan" id="r-rooms">0</span></div>
     <div class="readout"><span class="label">Deaths</span><span class="value" id="r-deaths">0</span></div>
     <div class="readout"><span class="label">Cost</span><span class="value" id="r-cost">$0.00</span></div>
     <div class="readout"><span class="label">Link</span><span class="value" id="r-link">·</span></div>
@@ -127,11 +126,13 @@
         <div class="quality-bar" id="q-bar"></div>
         <div class="quality-key" id="q-key"></div>
         <div class="kv" style="margin-top:6px">
-          <span class="k">distinct commands</span><span class="v" id="q-distinct">0</span>
-        </div>
-        <div class="kv">
           <span class="k">known dead ends</span><span class="v" id="q-deadends">0</span>
         </div>
+      </div>
+      <div class="section">
+        <h3>Vocabulary <span id="v-count" class="count-inline"></span></h3>
+        <div class="hint" style="margin-bottom:6px">words the parser turned out to know</div>
+        <div id="vocab"></div>
       </div>
       <div class="section">
         <h3>Discoveries <span id="d-count" class="count-inline"></span></h3>
@@ -148,27 +149,17 @@
         <div class="delta" id="s-delta"><div class="hint">nothing yet</div></div>
       </div>
       <div class="section">
-        <h3>Location</h3>
-        <div class="kv"><span class="k">room</span><span class="v" id="s-room">—</span></div>
-        <div class="kv"><span class="k">state hash</span><span class="v" id="s-hash">—</span></div>
-        <div class="kv"><span class="k">objects</span><span class="v" id="s-objects">0</span></div>
-      </div>
-      <div class="section">
         <h3>Carrying <span id="inv-count" class="count-inline"></span></h3>
         <ul class="plain" id="s-inventory"><li class="empty">empty-handed</li></ul>
       </div>
       <div class="section">
         <h3>Containers <span id="c-count" class="count-inline"></span></h3>
-        <div class="hint" style="margin-bottom:6px">only ones the agent has actually seen</div>
+        <div class="hint" style="margin-bottom:6px">objects with a state — contents shown once opened</div>
         <ul class="plain containers" id="s-containers"><li class="empty">none seen</li></ul>
       </div>
       <div class="section">
         <h3>Checkpoints</h3>
         <div class="chips" id="s-checkpoints"><span class="hint">none — press ⚑ Mark</span></div>
-      </div>
-      <div class="section">
-        <h3>Object tree</h3>
-        <div class="tree" id="s-tree"><div class="hint">no session</div></div>
       </div>
       <div class="section">
         <h3>Traces</h3>

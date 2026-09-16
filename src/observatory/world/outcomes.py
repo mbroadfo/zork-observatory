@@ -24,7 +24,7 @@ from enum import Enum
 from typing import Any
 
 from ..engine.base import Observation, WorldState
-from .discovery import NO_SUCH_THING, UNKNOWN_WORD, ERROR_REPLY_MAX_CHARS
+from .discovery import GRAMMAR, NO_SUCH_THING, UNKNOWN_WORD, ERROR_REPLY_MAX_CHARS
 from .graph import parse_movement
 
 META_WORDS = {
@@ -37,6 +37,7 @@ class Outcome(str, Enum):
     PROGRESS = "progress"        # the world is not what it was
     BLOCKED = "blocked"          # a real exit refusal: there is no way that way
     UNKNOWN_WORD = "unknown"     # the parser has never heard of it
+    GRAMMAR = "grammar"          # every word known; the sentence was not
     ABSENT_NOUN = "absent"       # understood, but that thing is not here
     INERT = "inert"              # understood, happened, changed nothing
     META = "meta"                # addressed the machine, not the world
@@ -45,7 +46,7 @@ class Outcome(str, Enum):
     @property
     def wasted(self) -> bool:
         return self in (
-            Outcome.BLOCKED, Outcome.UNKNOWN_WORD,
+            Outcome.BLOCKED, Outcome.UNKNOWN_WORD, Outcome.GRAMMAR,
             Outcome.ABSENT_NOUN, Outcome.INERT, Outcome.FUTILE,
         )
 
@@ -111,6 +112,8 @@ class OutcomeTally:
             outcome = Outcome.FUTILE
         elif _is_refusal(obs.text, UNKNOWN_WORD):
             outcome = Outcome.UNKNOWN_WORD
+        elif _is_refusal(obs.text, GRAMMAR):
+            outcome = Outcome.GRAMMAR
         elif _is_refusal(obs.text, NO_SUCH_THING):
             outcome = Outcome.ABSENT_NOUN
         elif parse_movement(cmd) is not None:

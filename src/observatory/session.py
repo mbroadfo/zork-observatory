@@ -26,6 +26,7 @@ from .world.coverage import Coverage
 from .world.discovery import DiscoveryLedger, Turn as DiscoveryTurn
 from .world.graph import MapGraph
 from .world.outcomes import OutcomeTally
+from .world.vocabulary import Vocabulary
 from .world.objects import build_tree, diff_objects, name_for
 
 
@@ -102,6 +103,7 @@ class Session:
         self.ledger = DiscoveryLedger()
         self.outcomes = OutcomeTally()
         self.coverage = Coverage()
+        self.vocabulary = Vocabulary()
         self.transcript: list[tuple[str, str]] = []
         self.checkpoints: dict[str, Checkpoint] = {}
 
@@ -167,11 +169,20 @@ class Session:
         if obs.lost:
             self.map.record_death(room_id)
 
+        # What the agent could perceive this turn. Established once, up front,
+        # because three separate panels depend on it agreeing with itself.
+        probe = DiscoveryTurn(
+            turn=self.turn, command=command, obs=obs, state=state,
+            prev_state=self._last_state, visited_rooms=set(), commands_seen=set(),
+        )
+        visible = probe.visible_objects()
+
         # Classify the turn before anything else reads the new state, so the
         # comparison is against the world as it was when the command was given.
         outcome = None
         if command:
             outcome = self.outcomes.classify(command, obs, state, self._last_state)
+            self.vocabulary.observe(command, outcome.outcome, obs.text)
 
         self._emit(
             "observation",
@@ -186,7 +197,16 @@ class Session:
             quality=self.outcomes.summary() if outcome else None,
         )
 
-        changes = diff_objects(self._prev_objects, state.objects)
+        # Only changes the agent could have witnessed.
+        #
+        # The object tree is the whole world and it keeps moving without the
+        # player: Zork's thief wanders the dungeon from turn one, so an
+        # unfiltered delta announced his position every few turns to an agent
+        # who had never met him. That is the game's knowledge, not the run's.
+        changes = [
+            c for c in diff_objects(self._prev_objects, state.objects)
+            if c.num in visible
+        ]
         if changes:
             self._emit(
                 "object.delta",
@@ -220,6 +240,8 @@ class Session:
             # trophy case exists somewhere and holds a painting the agent has
             # never seen", and it renders a walkthrough instead of a run.
             seen_objects=sorted(self.coverage.objects_seen),
+            opened_containers=sorted(self.coverage.opened),
+            vocabulary=self.vocabulary.summary(),
         )
 
         if any(delta.values()):
@@ -230,13 +252,11 @@ class Session:
                 **{k: v for k, v in delta.items() if v},
             )
 
-        # Ground covered. Reuses the ledger's notion of "what could the player
-        # see from here" so the two panels never disagree about visibility.
-        probe = DiscoveryTurn(
-            turn=self.turn, command=command, obs=obs, state=state,
-            prev_state=self._last_state, visited_rooms=set(), commands_seen=set(),
+        # Ground covered. Reuses the same visibility set as everything else so
+        # the panels never disagree about what the agent could see.
+        self.coverage.observe(
+            state, visible, probe.player_object(), command=command, text=obs.text
         )
-        self.coverage.observe(state, probe.visible_objects(), probe.player_object())
 
         # What the agent has worked out about the shape of the world, judged by
         # what it did rather than what it claimed.
@@ -511,6 +531,7 @@ class Session:
             discoveries=self.ledger.summary(),
             quality=self.outcomes.summary(),
             coverage=self.coverage.summary(),
+            vocabulary=self.vocabulary.summary(),
             usage=self.agent.usage(),
         )
         await self.agent.on_end(reason)
@@ -597,6 +618,7 @@ class Session:
             "discoveries": self.ledger.manifest(),
             "quality": self.outcomes.summary(),
             "coverage": self.coverage.summary(),
+            "vocabulary": self.vocabulary.summary(),
             "usage": self.agent.usage(),
             "checkpoints": [
                 {

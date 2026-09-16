@@ -34,14 +34,26 @@ from ..engine.base import Observation, WorldState
 
 # Parser idioms. Infocom-era games share these closely; other authoring systems
 # vary, which is why nothing critical depends on them alone.
+# Infocom makes three different refusals, and conflating them was a real bug.
+# On a live Zork run, grammar refusals were read as unknown words, which
+# condemned `attack`, `move`, `open` and `search` — all real verbs.
 UNKNOWN_WORD = (
-    "don't know the word", "don't know that word", "not a verb i recognise",
-    "not a verb i recognize", "that's not a verb", "i don't understand",
-    "that sentence isn't one i recognize",
+    "don't know the word", "don’t know the word", "don't know that word",
+    "not a verb i recognise", "not a verb i recognize", "that's not a verb",
+)
+# The words were all known; the sentence built from them was not.
+#   You used the word "remove" in a way that I don't understand.
+#   That sentence isn't one I recognize.
+GRAMMAR = (
+    "in a way that i don't understand", "sentence isn't one i recognize",
+    "sentence isn't one i recognise", "i didn't understand that sentence",
+    "i only understood you as far as",
 )
 NO_SUCH_THING = (
     "can't see any such thing", "you can't see that", "isn't here",
     "aren't holding that", "aren't carrying that", "you can't see it",
+    # Zork's own phrasing: "You can't see any mailbox here!"
+    "you can't see any",
 )
 
 # Error phrases are matched against *short* replies only.
