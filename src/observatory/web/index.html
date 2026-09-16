@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Zork Observatory</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>&#127756;</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IM+Fell+English+SC&display=swap">
 <link rel="stylesheet" href="/static/style.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.30.2/cytoscape.min.js"></script>
 </head>
@@ -21,7 +23,7 @@
     <input type="text" id="rom" value="roms/zork1.z5" placeholder="roms/zork1.z5" size="15">
     <select id="agent" title="Who plays">
       <option value="random">random</option>
-      <option value="scripted">scripted</option>
+      <option value="scripted" title="The game's own winning walkthrough — a reference, not a player">scripted — walkthrough</option>
       <option value="claude">claude</option>
       <option value="human">human</option>
     </select>
@@ -76,7 +78,7 @@
 
 <main>
   <!-- transcript --------------------------------------------------- -->
-  <section class="pane">
+  <section class="pane pane-left">
     <div class="pane-head">
       Transcript
       <span class="count" id="t-count"></span>
@@ -90,16 +92,56 @@
     </div>
   </section>
 
+  <div class="splitter" data-side="left" title="Drag to resize · double-click to hide the transcript"></div>
+
   <!-- map ----------------------------------------------------------- -->
-  <section class="pane">
+  <section class="pane pane-map">
     <div class="pane-head">
+      <button class="icon" id="hide-left" title="Hide / show the transcript">⟨</button>
       Map <span class="count" id="m-count">discovered by exploration</span>
       <span class="spacer"></span>
-      <button id="toggle-blocked">show walls</button>
-      <button id="fit">fit</button>
+      <div class="seg" id="view-seg">
+        <button data-view="chart" title="The 1982 map, uncovered as the run explores">chart</button>
+        <button data-view="graph" title="The map the run has drawn for itself">graph</button>
+      </div>
+      <button id="toggle-blocked" class="graph-only">show walls</button>
+      <button id="fit" class="graph-only">fit</button>
+      <button class="icon" id="hide-right" title="Hide / show world state">⟩</button>
     </div>
-    <div id="map"></div>
-    <div class="legend">
+
+    <div id="map-stage">
+      <div id="atlas">
+        <div id="atlas-world">
+          <img id="atlas-img" alt="" draggable="false">
+          <canvas id="atlas-fog"></canvas>
+          <svg id="atlas-marks" xmlns="http://www.w3.org/2000/svg"></svg>
+        </div>
+        <div id="atlas-drift"></div>
+        <div class="atlas-vignette"></div>
+
+        <div id="atlas-plate" class="atlas-ui">
+          <span class="kicker">you are in</span>
+          <span class="where">—</span>
+          <span class="sub"></span>
+        </div>
+
+        <div class="atlas-tools atlas-ui">
+          <button id="atlas-in" title="Zoom in (+)">+</button>
+          <button id="atlas-out" title="Zoom out (−)">−</button>
+          <button id="atlas-fit" title="Whole map (0)">⤢</button>
+          <button id="atlas-locate" title="Find the player (.)">◎</button>
+          <button id="atlas-follow" class="on" title="Keep the player in view">follow</button>
+        </div>
+
+        <canvas id="atlas-mini" class="atlas-ui" title="Click or drag to look elsewhere"></canvas>
+        <div id="atlas-credit"></div>
+        <div id="atlas-tip" hidden></div>
+        <div id="atlas-empty">no chart for this game — showing the graph</div>
+      </div>
+      <div id="map"></div>
+    </div>
+
+    <div class="legend graph-only">
       <span><i class="cur"></i>current</span>
       <span><i class="seen"></i>visited</span>
       <span><i class="dark"></i>dark</span>
@@ -107,10 +149,20 @@
       <span><i class="blk"></i>blocked exit</span>
       <span><i class="vert"></i>up / down</span>
     </div>
+    <div class="legend chart-only">
+      <span><i class="cur round"></i>you</span>
+      <span><i class="seen-chart"></i>visited</span>
+      <span><i class="trail"></i>recent path</span>
+      <span><i class="death round"></i>died here</span>
+      <span class="spacer"></span>
+      <span class="keys">drag · scroll · double-click · <kbd>+</kbd><kbd>−</kbd><kbd>0</kbd><kbd>.</kbd></span>
+    </div>
   </section>
 
+  <div class="splitter" data-side="right" title="Drag to resize · double-click to hide world state"></div>
+
   <!-- world state ---------------------------------------------------- -->
-  <section class="pane">
+  <section class="pane pane-right">
     <div class="pane-head">World state <span class="count">ground truth</span></div>
     <div class="pane-body">
       <div class="section">
@@ -170,6 +222,7 @@
 </main>
 
 <div id="toast"></div>
+<script src="/static/atlas.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

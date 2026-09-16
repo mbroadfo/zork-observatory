@@ -21,7 +21,12 @@ def build_agent(kind: str, **kwargs) -> Agent:
     if kind == "random":
         return RandomAgent(seed=kwargs.get("seed", 0))
     if kind == "scripted":
-        return ScriptedAgent(kwargs.get("commands") or MOCK_WALKTHROUGH)
+        # A real game's own walkthrough when the engine has one; the fixture's
+        # otherwise. The mock has no walkthrough of its own on purpose — it
+        # would make the fixture depend on the agents package.
+        if kwargs.get("commands"):
+            return ScriptedAgent(kwargs["commands"], source="walkthrough")
+        return ScriptedAgent(MOCK_WALKTHROUGH, source="mock script")
     if kind == "human":
         return HumanAgent()
     if kind == "claude":

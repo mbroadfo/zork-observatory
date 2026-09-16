@@ -46,6 +46,15 @@ BARE = {
     "se", "sw", "u", "d", "look", "l", "inventory", "i", "wait", "z", "score",
 }
 
+# Standard one-letter forms. Listing `n` beside `north` as two verbs the agent
+# found is double counting; the ledger already records, once, that
+# abbreviations work at all.
+ABBREVIATIONS = {
+    "n": "north", "s": "south", "e": "east", "w": "west",
+    "ne": "northeast", "nw": "northwest", "se": "southeast", "sw": "southwest",
+    "u": "up", "d": "down", "l": "look", "i": "inventory", "z": "wait",
+}
+
 FILLER = {"the", "a", "an", "at", "in", "on", "to", "with", "into", "from", "of"}
 
 
@@ -61,7 +70,7 @@ class Vocabulary:
         if not words:
             return
 
-        verb, nouns = words[0], words[1:]
+        verb, nouns = ABBREVIATIONS.get(words[0], words[0]), words[1:]
 
         if outcome is Outcome.GRAMMAR:
             # "You used the word X in a way that I don't understand." Every word

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +20,7 @@ from pydantic import BaseModel
 
 from .agents import build_agent
 from .agents.simple import HumanAgent
-from .engine import build_engine
+from .engine import build_engine, engine_seed
 from .events import Event, EventBus
 from .session import Session, SessionConfig
 from .trace import TraceWriter, read_events, trace_header
@@ -132,18 +133,62 @@ async def state() -> JSONResponse:
     return JSONResponse({"session": hub.session.summary(), "traces": _list_traces()})
 
 
+@app.get("/api/atlas")
+async def atlas(story: str = "") -> JSONResponse:
+    """The scanned map for this exact story build, if one is installed.
+
+    Room coordinates are keyed by object number, which only holds for the
+    release they were measured against — so the match is on the story header,
+    never the filename. No match (or no image on disk) means the browser falls
+    back to the graph it draws itself.
+    """
+    found = find_atlas(story)
+    if found is None:
+        return JSONResponse({"atlas": None})
+    return JSONResponse({"atlas": found})
+
+
+def find_atlas(story: str) -> dict[str, Any] | None:
+    if not story:
+        return None
+    for path in sorted((WEB_DIR / "atlas").glob("*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if data.get("story") != story:
+            continue
+        # The scan is not ours to redistribute, so it may legitimately be absent.
+        if not (path.parent / data["image"]).exists():
+            return None
+        data["image_url"] = f"/static/atlas/{data['image']}"
+        return data
+    return None
+
+
 @app.post("/api/session")
 async def new_session(req: NewSession) -> JSONResponse:
     await hub.teardown()
 
     try:
-        engine = build_engine(req.engine, rom=req.rom, seed=req.seed)
+        engine = build_engine(req.engine, rom=req.rom, seed=engine_seed(req.agent, req.seed))
     except Exception as exc:
         return JSONResponse({"error": f"{type(exc).__name__}: {exc}"}, status_code=400)
+
+    script = engine.walkthrough() if req.agent == "scripted" else None
+    if req.agent == "scripted" and req.engine != "mock" and not script:
+        engine.close()
+        return JSONResponse(
+            {"error": "no verified walkthrough for this game — scripted needs one"},
+            status_code=400,
+        )
+    # A replay should run to its end; the budget is for agents that explore.
+    max_turns = max(req.max_turns, len(script) + 20) if script else req.max_turns
 
     try:
         agent = build_agent(
             req.agent,
+            commands=script,
             seed=req.seed,
             model=req.model,
             effort=req.effort,
@@ -169,7 +214,7 @@ async def new_session(req: NewSession) -> JSONResponse:
         agent=agent,
         bus=hub.bus,
         config=SessionConfig(
-            max_turns=req.max_turns,
+            max_turns=max_turns,
             max_cost_usd=req.max_cost_usd,
             lives=req.lives,
             delay=req.delay,

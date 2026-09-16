@@ -131,21 +131,60 @@ button.primary:hover:not(:disabled) { background: #241c08; }
 
 /* ---------- layout ---------- */
 
+/* The map is the centre of the instrument, so it takes whatever the side panes
+   don't. Side widths are set by dragging the splitters and remembered. */
 main {
+  --lw: 330px;
+  --rw: 320px;
   flex: 1;
   display: grid;
-  grid-template-columns: minmax(300px, 1.05fr) minmax(360px, 1.7fr) minmax(280px, .95fr);
+  grid-template-columns: var(--lw) 5px minmax(0, 1fr) 5px var(--rw);
   min-height: 0;
 }
+main.no-left  { grid-template-columns: 0 0 minmax(0, 1fr) 5px var(--rw); }
+main.no-right { grid-template-columns: var(--lw) 5px minmax(0, 1fr) 0 0; }
+main.no-left.no-right { grid-template-columns: 0 0 minmax(0, 1fr) 0 0; }
+main.no-left .pane-left,
+main.no-right .pane-right,
+main.no-left .splitter[data-side="left"],
+main.no-right .splitter[data-side="right"] { display: none; }
 
 .pane {
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  border-right: 1px solid var(--line);
 }
-.pane:last-child { border-right: none; }
+
+.splitter {
+  background: var(--line);
+  cursor: col-resize;
+  position: relative;
+  transition: background .15s;
+}
+.splitter::after {
+  content: "";
+  position: absolute;
+  inset: 0 -4px;
+}
+.splitter:hover, .splitter.dragging { background: var(--amber-soft); }
+body.resizing { cursor: col-resize; user-select: none; }
+body.resizing iframe, body.resizing #map-stage { pointer-events: none; }
+
+.pane-head button.icon {
+  padding: 0 6px;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--dim);
+}
+main.no-left #hide-left,
+main.no-right #hide-right { color: var(--amber); border-color: var(--amber-soft); }
+
+.seg { display: inline-flex; }
+.seg button { border-radius: 0; margin-left: -1px; }
+.seg button:first-child { border-radius: 4px 0 0 4px; margin-left: 0; }
+.seg button:last-child { border-radius: 0 4px 4px 0; }
+.seg button.on { color: var(--amber); border-color: var(--amber-soft); background: #241c08; position: relative; }
 
 .pane-head {
   display: flex;
@@ -243,12 +282,254 @@ main {
 
 /* ---------- map ---------- */
 
-#map {
+#map-stage {
   flex: 1;
   min-height: 0;
+  position: relative;
+}
+
+#map {
+  position: absolute;
+  inset: 0;
   background:
     radial-gradient(circle at 50% 40%, #121826 0%, var(--bg) 70%);
 }
+
+/* View switching. The graph stays alive underneath so it is current on return. */
+.pane-map[data-view="chart"] #map { visibility: hidden; }
+.pane-map[data-view="graph"] #atlas { display: none; }
+.pane-map[data-view="chart"] .graph-only { display: none; }
+.pane-map[data-view="graph"] .chart-only { display: none; }
+
+/* ---------- chart ---------- */
+
+#atlas {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: #05070b;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+#atlas.grabbing { cursor: grabbing; }
+#atlas.over-room { cursor: pointer; }
+
+#atlas-world {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  opacity: 0;
+  transition: opacity .6s ease;
+}
+#atlas.ready #atlas-world { opacity: 1; }
+#atlas-world.moving { will-change: transform; }
+
+#atlas-img,
+#atlas-fog,
+#atlas-marks {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+/* Aged a little so the amber marks read against it. */
+#atlas-img { filter: sepia(.25) saturate(.9) brightness(.92) contrast(1.05); }
+#atlas-marks { overflow: visible; pointer-events: none; }
+
+#atlas-drift {
+  position: absolute;
+  inset: -256px;
+  background-size: 768px 768px;
+  opacity: .22;
+  mix-blend-mode: screen;
+  pointer-events: none;
+  animation: drift 90s linear infinite;
+}
+@keyframes drift {
+  from { transform: translate(0, 0); }
+  to   { transform: translate(256px, 128px); }
+}
+
+.atlas-vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  box-shadow: inset 0 0 120px 30px rgba(0, 0, 0, .75);
+}
+
+/* Marks are in scan pixels; strokes are sized to read at working zoom. */
+#atlas-marks .visited {
+  fill: rgba(232, 179, 57, .05);
+  stroke: rgba(232, 179, 57, .38);
+  stroke-width: 5;
+}
+#atlas-marks .trail {
+  fill: none;
+  stroke: #e8b339;
+  stroke-opacity: .55;
+  stroke-width: 9;
+  stroke-dasharray: 4 22;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  animation: march 1.6s linear infinite;
+}
+@keyframes march { to { stroke-dashoffset: -26; } }
+
+#atlas-marks .death circle { fill: rgba(40, 6, 10, .8); stroke: var(--red); stroke-width: 5; }
+#atlas-marks .death path { stroke: var(--red); stroke-width: 9; stroke-linecap: round; }
+#atlas-marks .death text {
+  fill: var(--red);
+  font: 700 44px var(--mono);
+  paint-order: stroke;
+  stroke: #1a0508;
+  stroke-width: 8px;
+}
+
+#mk-you { transition: transform .65s cubic-bezier(.45, .05, .25, 1); }
+#mk-you .you-box {
+  fill: rgba(255, 211, 107, .08);
+  stroke: #ffd36b;
+  stroke-width: 7;
+  filter: drop-shadow(0 0 14px rgba(232, 179, 57, .9));
+}
+#mk-you .you-dot {
+  fill: #ffd36b;
+  filter: drop-shadow(0 0 10px #e8b339);
+}
+#mk-you .you-ring {
+  fill: none;
+  stroke: #ffd36b;
+  stroke-width: 5;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: ping 2.6s ease-out infinite;
+}
+#mk-you .you-ring.late { animation-delay: 1.3s; }
+#mk-you .you-halo { animation: breathe 3.2s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+@keyframes ping {
+  0%   { transform: scale(.55); opacity: .9; }
+  100% { transform: scale(1.45); opacity: 0; }
+}
+@keyframes breathe {
+  0%, 100% { opacity: .75; transform: scale(.95); }
+  50%      { opacity: 1; transform: scale(1.05); }
+}
+
+.atlas-ui { position: absolute; z-index: 2; }
+#atlas:not(.ready) .atlas-ui,
+#atlas:not(.ready) #atlas-credit { display: none; }
+
+#atlas-plate {
+  top: 14px;
+  left: 16px;
+  display: flex;
+  flex-direction: column;
+  padding: 9px 16px 10px;
+  background: linear-gradient(180deg, rgba(20, 16, 8, .88), rgba(12, 10, 6, .82));
+  border: 1px solid rgba(232, 179, 57, .28);
+  border-radius: 3px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .55);
+  pointer-events: none;
+  max-width: calc(100% - 200px);
+}
+#atlas-plate .kicker {
+  font-size: 9px;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+  color: #8a7446;
+}
+#atlas-plate .where {
+  font-family: "IM Fell English SC", "Palatino Linotype", Palatino, Georgia, serif;
+  font-size: 25px;
+  line-height: 1.15;
+  color: #f1d58f;
+  text-shadow: 0 0 18px rgba(232, 179, 57, .35);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#atlas-plate .sub { font-size: 10.5px; color: #9c8a64; margin-top: 1px; }
+
+.atlas-tools {
+  top: 14px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.atlas-tools button {
+  min-width: 34px;
+  height: 30px;
+  padding: 0 8px;
+  font-size: 16px;
+  line-height: 1;
+  background: rgba(14, 16, 22, .82);
+  border-color: rgba(232, 179, 57, .22);
+  color: #d9c28a;
+  backdrop-filter: blur(4px);
+}
+.atlas-tools button:hover:not(:disabled) { background: rgba(36, 28, 8, .92); border-color: var(--amber-soft); }
+.atlas-tools #atlas-follow { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+.atlas-tools #atlas-follow.on { color: #14100a; background: #e8b339; border-color: #e8b339; }
+
+#atlas-mini {
+  right: 16px;
+  bottom: 16px;
+  border: 1px solid rgba(232, 179, 57, .3);
+  border-radius: 3px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .6);
+  cursor: crosshair;
+  background: #06080d;
+  opacity: .92;
+  transition: opacity .2s;
+}
+#atlas-mini:hover { opacity: 1; }
+
+#atlas-credit {
+  position: absolute;
+  left: 16px;
+  bottom: 10px;
+  font-size: 9.5px;
+  color: rgba(200, 180, 130, .45);
+  pointer-events: none;
+  letter-spacing: .03em;
+}
+
+#atlas-tip {
+  position: absolute;
+  z-index: 3;
+  pointer-events: none;
+  padding: 7px 10px;
+  max-width: 280px;
+  background: rgba(12, 10, 6, .94);
+  border: 1px solid rgba(232, 179, 57, .35);
+  border-radius: 3px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #cbbd99;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .6);
+}
+#atlas-tip b {
+  font-family: "IM Fell English SC", Georgia, serif;
+  font-weight: 400;
+  font-size: 15px;
+  color: #f1d58f;
+}
+#atlas-tip .dim { color: #7d7055; }
+#atlas-tip .bad { color: var(--red); }
+
+#atlas-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--dimmer);
+  font-style: italic;
+  pointer-events: none;
+}
+#atlas.ready #atlas-empty { display: none; }
 
 .legend {
   display: flex;
@@ -274,6 +555,20 @@ main {
 .legend .death { background: var(--red); }
 .legend .blk { background: var(--red); border-radius: 50%; width: 7px; height: 7px; }
 .legend .vert { background: linear-gradient(90deg, var(--cyan) 50%, transparent 50%); background-size: 4px 100%; }
+.legend .round { border-radius: 50%; }
+.legend .seen-chart { background: rgba(232, 179, 57, .08); border: 1px solid rgba(232, 179, 57, .5); }
+.legend .trail { background: linear-gradient(90deg, var(--amber) 40%, transparent 40%); background-size: 5px 100%; height: 2px; vertical-align: 3px; }
+.legend .spacer { flex: 1; }
+.legend .keys { color: var(--dimmer); }
+.legend kbd {
+  font: inherit;
+  font-size: 9.5px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  padding: 0 4px;
+  margin-left: 2px;
+  color: var(--dim);
+}
 
 /* ---------- state pane ---------- */
 
@@ -470,6 +765,14 @@ ul.ledger li.fresh { animation: lit 1.4s ease-out; }
 #toast.on { opacity: 1; }
 
 @media (max-width: 1100px) {
-  main { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr 1fr; overflow-y: auto; }
-  .pane { border-right: none; border-bottom: 1px solid var(--line); min-height: 320px; }
+  main, main.no-left, main.no-right, main.no-left.no-right {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto;
+    overflow-y: auto;
+  }
+  .splitter, .pane-head button.icon { display: none; }
+  .pane { border-bottom: 1px solid var(--line); min-height: 320px; }
+  .pane-map { order: -1; min-height: 70vh; }
+  main.no-left .pane-left, main.no-right .pane-right { display: flex; }
+  #atlas-mini { display: none; }
 }

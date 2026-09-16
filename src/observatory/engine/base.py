@@ -62,10 +62,27 @@ class WorldState:
         return d
 
 
+def story_id(data: bytes) -> str | None:
+    """Identify a Z-machine story file by its header: `release-serial-checksum`.
+
+    The filename says nothing — `zork1.z5` has shipped in a dozen releases whose
+    object numbers differ, and anything keyed to object numbers (an atlas, a
+    walkthrough) is only valid for the exact build it was made against.
+    """
+    if len(data) < 0x40 or not 1 <= data[0] <= 8:
+        return None
+    release = int.from_bytes(data[2:4], "big")
+    serial = data[0x12:0x18].decode("ascii", "replace")
+    checksum = int.from_bytes(data[0x1C:0x1E], "big")
+    return f"{release}-{serial}-{checksum:04x}"
+
+
 class GameEngine(ABC):
     """A deterministic, snapshot-able interactive fiction world."""
 
     name: str = "unknown"
+    # Exact build of the story, when the backend can tell. See `story_id`.
+    story: str | None = None
 
     @abstractmethod
     def reset(self) -> tuple[Observation, WorldState]:
@@ -86,6 +103,10 @@ class GameEngine(ABC):
     @abstractmethod
     def restore(self, blob: Any) -> None:
         """Rewind to a snapshot. This is what makes branching possible."""
+
+    def walkthrough(self) -> list[str] | None:
+        """A known winning command list for this world as seeded, if any."""
+        return None
 
     def valid_actions(self) -> list[str] | None:
         """Actions that actually change world state, if the backend knows."""

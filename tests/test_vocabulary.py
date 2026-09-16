@@ -142,6 +142,21 @@ class TestShape:
         assert {"inventory", "north"} <= v.verbs_ok
 
 
+class TestAbbreviations:
+    def test_short_forms_fold_into_the_word_they_stand_for(self):
+        v = Vocabulary()
+        v.observe("n", Outcome.PROGRESS)
+        v.observe("north", Outcome.PROGRESS)
+        v.observe("L", Outcome.META)
+        v.observe("se", Outcome.BLOCKED)
+        assert v.verbs_ok == {"north", "look", "southeast"}
+
+    def test_a_single_letter_that_is_not_a_short_form_is_left_alone(self):
+        v = Vocabulary()
+        v.observe("x mailbox", Outcome.PROGRESS)
+        assert "x" in v.verbs_ok
+
+
 class TestAgainstARun:
     async def _run(self, commands):
         session = Session(

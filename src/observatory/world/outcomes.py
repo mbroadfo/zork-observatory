@@ -97,7 +97,10 @@ class OutcomeTally:
 
         # "Did the world change" is the only test that needs no game knowledge,
         # so it is asked first and everything else is a refinement of *why not*.
-        changed = prev_state is None or (
+        # Winning is progress by definition, even when the final move leaves
+        # every tracked field as it was (Zork's does: the player never leaves
+        # the barrow's doorstep, the game just ends).
+        changed = prev_state is None or obs.won or (
             state.state_hash != prev_state.state_hash
             or state.location_id != prev_state.location_id
             or state.score != prev_state.score

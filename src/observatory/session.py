@@ -144,6 +144,7 @@ class Session:
         self._emit(
             "session.started",
             game=self.engine.name,
+            story=self.engine.story,
             agent=self.agent.name,
             agent_kind=self.agent.kind,
             agent_config=self.agent.describe(),
@@ -165,6 +166,7 @@ class Session:
             turn=self.turn,
             response=obs.text,
             dark=state.dark,
+            ended=obs.done,
         )
         if obs.lost:
             self.map.record_death(room_id)

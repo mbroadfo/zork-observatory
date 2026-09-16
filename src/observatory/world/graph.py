@@ -131,8 +131,13 @@ class MapGraph:
         turn: int,
         response: str = "",
         dark: bool = False,
+        ended: bool = False,
     ) -> dict[str, Any]:
-        """Fold one turn into the map. Returns what changed, for the event stream."""
+        """Fold one turn into the map. Returns what changed, for the event stream.
+
+        `ended` marks the move that finished the game. It can leave the player
+        where they stood — Zork's winning move does — and that is not a wall.
+        """
         delta: dict[str, Any] = {"new_room": None, "new_edge": None, "new_blocked": None}
 
         new_room = self.observe_room(new_id, new_name, turn, dark)
@@ -144,6 +149,8 @@ class MapGraph:
             return delta
 
         if prev_id == new_id:
+            if ended:
+                return delta
             # A movement command that didn't move us: a wall, a locked door, a
             # closed window. Worth drawing — it's a fact about the map.
             key = f"{prev_id}|{direction}"

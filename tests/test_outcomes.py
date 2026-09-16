@@ -174,3 +174,33 @@ class TestHarvesterHygiene:
 
     async def test_the_baseline_knows_nothing_before_it_is_shown_anything(self):
         assert RandomAgent(seed=1)._nouns == []
+
+
+class TestTheWinningMove:
+    def test_winning_is_progress_even_if_nothing_else_changed(self):
+        """Zork's last move ends the game without moving the player."""
+        from observatory.engine.base import Observation, WorldState
+        from observatory.world.outcomes import Outcome, OutcomeTally
+
+        s = WorldState(location_id=178, location_name="Stone Barrow", score=350, state_hash="x")
+        won = Observation(text="Inside the Barrow ... Your score is 350.", done=True, won=True)
+        assert OutcomeTally().classify("w", won, s, s).outcome is Outcome.PROGRESS
+
+
+class TestEndingMovesAreNotWalls:
+    def test_a_move_that_ends_the_game_draws_no_wall(self):
+        from observatory.world.graph import MapGraph
+
+        g = MapGraph()
+        g.observe_transition(None, "", "r178", "Stone Barrow", 0)
+        delta = g.observe_transition("r178", "w", "r178", "Stone Barrow", 1, ended=True)
+        assert delta["new_blocked"] is None
+        assert g.blocked == {}
+
+    def test_an_ordinary_refusal_still_does(self):
+        from observatory.world.graph import MapGraph
+
+        g = MapGraph()
+        g.observe_transition(None, "", "r178", "Stone Barrow", 0)
+        g.observe_transition("r178", "e", "r178", "Stone Barrow", 1, response="You can't go that way.")
+        assert "r178|east" in g.blocked

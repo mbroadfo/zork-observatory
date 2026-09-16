@@ -14,6 +14,12 @@ roms/
 *.z8
 *.zblorb
 
+# The 1982 Zork Users Group map scan is copyrighted too. The atlas JSON (room
+# coordinates) is ours and is committed; the image is supplied locally —
+# see tools/build_atlas.py.
+assets/
+src/observatory/web/atlas/*.jpg
+
 # Run output
 traces/
 .env

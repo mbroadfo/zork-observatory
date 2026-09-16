@@ -210,3 +210,35 @@ class TestValidActions:
         assert "north" in actions
         assert "open small mailbox" in actions
         assert "take painting" not in actions  # two rooms and a dark climb away
+
+
+class TestWalkthroughReplay:
+    """Scripted runs replay a recorded walkthrough, which is only valid under
+    the seed it was recorded with. The Jericho side is verified in Docker:
+    Zork I's walkthrough wins 350/350 under its own seed and dies at step 34
+    under ours."""
+
+    def test_scripted_runs_ask_for_the_recorded_seed(self):
+        from observatory.engine import engine_seed
+
+        assert engine_seed("scripted", 12345) is None
+        assert engine_seed("random", 12345) == 12345
+        assert engine_seed("claude", 7) == 7
+
+    def test_the_mock_accepts_the_recorded_seed_request(self):
+        from observatory.engine import build_engine
+
+        assert isinstance(build_engine("mock", seed=None), MockEngine)
+
+    def test_engines_without_a_walkthrough_say_so(self):
+        assert MockEngine().walkthrough() is None
+
+    def test_scripted_agent_uses_a_supplied_walkthrough(self):
+        from observatory.agents import MOCK_WALKTHROUGH, build_agent
+
+        agent = build_agent("scripted", commands=["n", "open window"])
+        assert agent.commands == ["n", "open window"]
+        assert agent.describe()["source"] == "walkthrough"
+
+        fallback = build_agent("scripted")
+        assert fallback.commands == MOCK_WALKTHROUGH

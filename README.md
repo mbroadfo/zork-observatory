@@ -66,6 +66,24 @@ observatory play --agent scripted --turns 30   # no ROM, no API key, no Docker
 pytest
 ```
 
+### The walkthrough, as a reference
+
+`--agent scripted` on a real game replays the game's own winning walkthrough,
+the one Jericho ships and verifies. On Zork I it takes 396 commands to score
+350/350 with no deaths, visiting 84 rooms. The replay is a ceiling to measure
+against and a way to watch the whole chart uncovered. It knows everything and
+discovers nothing, so treat its numbers as a reference, not a result.
+
+The walkthrough only works under the random seed it was recorded with. Zork's
+combat and thief are random, and under any other seed the same script dies in
+the forest at command 34. So a scripted run always uses the recorded seed, and
+its turn budget grows to fit the script. A game with no verified walkthrough is
+refused rather than replayed wrong.
+
+```bash
+observatory play --engine jericho --rom roms/zork1.z5 --agent scripted
+```
+
 ### Playing with Claude
 
 ```bash
@@ -115,6 +133,50 @@ Nothing is hardcoded about Zork's geography. A movement command plus the room
 the player ended up in yields an edge; a movement command that *didn't* move you
 yields a blocked exit, drawn as a stub with the refusal message attached. It
 works on any game the engine can load.
+
+### The chart: a period map under fog
+
+For Zork I there is a second view: the 1982 Zork Users Group map (D. Ardito
+and S. Meretzky), kept dark until the run gets there. Each room the run visits
+clears a ragged, soft-edged patch of fog. Each passage it walks is uncovered
+along the line the cartographers inked, starting from the room it left. The current room pulses. Its recent path is drawn as
+marching dashes, deaths are marked in red, and a minimap shows where the view
+is looking. Drag to pan, scroll or pinch to zoom, double-click to dive in;
+`+` `−` `0` `.` do the same from the keyboard. `[` `]` hide the side panes,
+and `m` leaves only the map.
+
+The chart belongs to whoever is watching. The agent never sees it.
+
+Room boxes live in `web/atlas/zork1-r88.json`, keyed by object number, and
+the atlas is matched to the game by its story header (release, serial and
+checksum), not by filename. Object numbers change between releases, so a chart
+measured on one release says nothing about another. Zork has four rooms called
+Forest and fifteen called Maze; each was matched to its box by reading the
+exit table out of the story file. Games with no matching atlas get the graph.
+
+**The scan is not included**, for the same reason the story file isn't.
+Supply your own copy and build the web image:
+
+```bash
+pip install pillow
+python tools/build_atlas.py path/to/zork-1-map-ZUG-1982.jpeg          # 6517×5030
+python tools/build_atlas.py path/to/scan.jpeg --check traces/check.jpg  # outline every box
+```
+
+The passages in the atlas were traced from the scan by
+`tools/trace_paths.py`:
+
+- **Which pairs to trace** comes from the exit table in the story file.
+- **The route** between each pair is the cheapest one through thick ink. The
+  map's passage lines are thick strokes, while its illustrations are hatched in
+  thin ones.
+- **Two kinds of hand correction** are recorded in the atlas:
+  - `stubs` are pairs the map only marks with a "(to …)" label.
+  - `drawn` are routes traced by hand where a line runs into artwork.
+
+Room boxes, passages and corrections are all derived data, so they're
+committed. Re-tracing needs Pillow, numpy and scikit-image, and only matters if
+the boxes change.
 
 ### How much the agent is told is a variable, not a setting
 
@@ -315,7 +377,10 @@ src/observatory/
   events.py     the event bus
   trace.py      JSONL read/write
   server.py     FastAPI + WebSocket
-  web/          the front end
+  web/          the front end · atlas.js (the chart) · atlas/ (room boxes)
+tools/
+  build_atlas.py  scan → web image, plus a calibration overlay
+  trace_paths.py  exit table + scan → the inked passage between each pair of rooms
 ```
 
 ## Roadmap

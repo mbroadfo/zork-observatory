@@ -343,6 +343,133 @@ function applyBlockedVisibility() {
   cy.$("edge.blocked-edge").toggleClass("hidden-blocked", hide);
 }
 
+/* ------------------------------------------------------------------ *
+ * Chart / graph switching, and the layout around them
+ * ------------------------------------------------------------------ */
+
+const prefs = (() => {
+  const read = (k, d) => {
+    try {
+      const v = localStorage.getItem(`zo.${k}`);
+      return v === null ? d : JSON.parse(v);
+    } catch (_) {
+      return d;
+    }
+  };
+  const write = (k, v) => {
+    try {
+      localStorage.setItem(`zo.${k}`, JSON.stringify(v));
+    } catch (_) { /* private window — the layout just won't persist */ }
+  };
+  return { read, write };
+})();
+
+const mapPane = document.querySelector(".pane-map");
+const mainEl = document.querySelector("main");
+
+// What the viewer asked for, and what they are getting: a game with no chart
+// shows the graph without forgetting that the chart was preferred.
+let preferredView = prefs.read("view", "chart");
+
+function setView(view, remember) {
+  if (remember) {
+    preferredView = view;
+    prefs.write("view", view);
+  }
+  const actual = view === "chart" && !Chart.active ? "graph" : view;
+  mapPane.dataset.view = actual;
+  for (const b of document.querySelectorAll("#view-seg button")) {
+    b.classList.toggle("on", b.dataset.view === actual);
+    if (b.dataset.view === "chart") {
+      b.disabled = !Chart.active;
+      b.title = Chart.active
+        ? "The 1982 map, uncovered as the run explores"
+        : "No chart is installed for this story build";
+    }
+  }
+  if (actual === "graph") {
+    cy.resize();
+    if (state.rooms.size) cy.fit(undefined, 60);
+  } else {
+    Chart.shown();
+  }
+}
+
+for (const b of document.querySelectorAll("#view-seg button")) {
+  b.onclick = () => setView(b.dataset.view, true);
+}
+
+Chart.describe = (id) => {
+  const room = state.rooms.get(id);
+  if (!room) return null;
+  return {
+    name: room.name,
+    visits: room.visits || 1,
+    exits: [...new Set([...state.edges.values()].filter((e) => e.src === id).map((e) => e.direction))],
+    blocked: [...new Set([...state.blocked.values()].filter((b) => b.src === id).map((b) => b.direction))],
+  };
+};
+
+function applyLayout() {
+  mainEl.style.setProperty("--lw", `${prefs.read("lw", 330)}px`);
+  mainEl.style.setProperty("--rw", `${prefs.read("rw", 320)}px`);
+  mainEl.classList.toggle("no-left", prefs.read("noLeft", false));
+  mainEl.classList.toggle("no-right", prefs.read("noRight", false));
+  $("hide-left").textContent = mainEl.classList.contains("no-left") ? "⟩" : "⟨";
+  $("hide-right").textContent = mainEl.classList.contains("no-right") ? "⟨" : "⟩";
+  cy.resize();
+}
+
+function togglePane(side) {
+  const key = side === "left" ? "noLeft" : "noRight";
+  prefs.write(key, !prefs.read(key, false));
+  applyLayout();
+}
+
+$("hide-left").onclick = () => togglePane("left");
+$("hide-right").onclick = () => togglePane("right");
+
+for (const bar of document.querySelectorAll(".splitter")) {
+  const side = bar.dataset.side;
+  bar.addEventListener("dblclick", () => togglePane(side));
+  bar.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    bar.setPointerCapture(e.pointerId);
+    bar.classList.add("dragging");
+    document.body.classList.add("resizing");
+    const total = mainEl.getBoundingClientRect();
+    const move = (ev) => {
+      const w = side === "left" ? ev.clientX - total.left : total.right - ev.clientX;
+      // Never let a side pane squeeze the map below a usable width.
+      const max = total.width - 420 - (side === "left" ? prefs.read("rw", 320) : prefs.read("lw", 330));
+      prefs.write(side === "left" ? "lw" : "rw", Math.round(Math.max(200, Math.min(w, max))));
+      applyLayout();
+    };
+    const up = () => {
+      bar.classList.remove("dragging");
+      document.body.classList.remove("resizing");
+      bar.removeEventListener("pointermove", move);
+      bar.removeEventListener("pointerup", up);
+    };
+    bar.addEventListener("pointermove", move);
+    bar.addEventListener("pointerup", up);
+  });
+}
+
+window.addEventListener("keydown", (e) => {
+  if (e.target.closest("input, select, textarea") || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key === "[") togglePane("left");
+  else if (e.key === "]") togglePane("right");
+  else if (e.key === "m") {
+    // Map only, or back to whatever was open before.
+    const both = mainEl.classList.contains("no-left") && mainEl.classList.contains("no-right");
+    prefs.write("noLeft", !both);
+    prefs.write("noRight", !both);
+    applyLayout();
+  } else return;
+  e.preventDefault();
+});
+
 let fitted = false;
 function maybeFit() {
   if (state.rooms.size <= 1) return;
@@ -767,6 +894,7 @@ function handle(event) {
     case "session.started":
       resetView();
       note(`▸ ${p.game} · ${p.agent} · max score ${p.max_score}`);
+      Chart.load(p.story).then(() => setView(preferredView));
       break;
 
     case "agent.thought":
@@ -781,6 +909,7 @@ function handle(event) {
 
     case "observation": {
       const kind = p.lost ? "death" : p.won ? "win" : "";
+      if (p.lost) Chart.death(state.current);
       addEntry(state.pendingThought, p.text, kind, p.outcome);
       state.pendingThought = null;
       if (p.quality) renderQuality(p.quality);
@@ -788,7 +917,11 @@ function handle(event) {
     }
 
     case "state.snapshot":
+      if (p.room_id !== state.current && state.rooms.has(p.room_id)) {
+        state.rooms.get(p.room_id).visits = (state.rooms.get(p.room_id).visits || 1) + 1;
+      }
       state.current = p.room_id;
+      Chart.arrive(p.room_id, p.location_name);
       renderSnapshot(p);
       renderCoverage(p.coverage);
       if (state.rooms.has(p.room_id)) {
@@ -834,6 +967,7 @@ function handle(event) {
       }
       if (p.new_edge) {
         state.edges.set(p.new_edge.key, p.new_edge);
+        Chart.link(p.new_edge.src, p.new_edge.dst);
         // A newly reciprocal edge means its partner changed too.
         for (const e of state.edges.values()) {
           if (e.src === p.new_edge.dst && e.dst === p.new_edge.src) {
@@ -904,6 +1038,7 @@ function resetView() {
   entryCount = 0;
   fitted = false;
   cy.elements().remove();
+  Chart.reset();
   transcript.innerHTML = "";
   $("r-cost").textContent = "$0.00";
   $("r-turn").textContent = "0";
@@ -1090,5 +1225,7 @@ function toast(message, ms = 4000) {
 
 syncAgentControls();
 syncEngineControls();
+applyLayout();
+setView(preferredView);
 connect();
 refresh();

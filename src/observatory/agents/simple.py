@@ -146,22 +146,32 @@ class RandomAgent(Agent):
 
 
 class ScriptedAgent(Agent):
-    """Replays a fixed command list. The canonical-walkthrough control arm."""
+    """Replays a fixed command list. The canonical-walkthrough control arm.
+
+    On a real game this is the game's own winning walkthrough: a ceiling to
+    measure agents against, and a way to watch the whole world uncovered. It
+    knows everything and discovers nothing, so its numbers are a reference,
+    never a result.
+    """
 
     name = "scripted"
     kind = "baseline"
 
-    def __init__(self, commands: list[str], loop_tail: str = "look") -> None:
+    def __init__(self, commands: list[str], loop_tail: str = "look", source: str = "script") -> None:
         self.commands = list(commands)
         self.loop_tail = loop_tail
+        self.source = source
         self._i = 0
 
     async def act(self, ctx: TurnContext) -> AgentAction:
         if self._i < len(self.commands):
             cmd = self.commands[self._i]
             self._i += 1
-            return AgentAction(command=cmd, thought=f"script step {self._i}/{len(self.commands)}")
-        return AgentAction(command=self.loop_tail, thought="script exhausted")
+            return AgentAction(command=cmd, thought=f"{self.source} step {self._i}/{len(self.commands)}")
+        return AgentAction(command=self.loop_tail, thought=f"{self.source} exhausted")
+
+    def describe(self) -> dict:
+        return {**super().describe(), "source": self.source, "steps": len(self.commands)}
 
 
 class HumanAgent(Agent):

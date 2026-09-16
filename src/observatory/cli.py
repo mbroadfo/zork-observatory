@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from .agents import build_agent
-from .engine import build_engine
+from .engine import build_engine, engine_seed
 from .events import Event, EventBus
 from .session import Session, SessionConfig
 from .trace import TraceWriter, read_events, trace_header
@@ -42,9 +42,16 @@ def _add_run_args(p: argparse.ArgumentParser) -> None:
 
 
 async def _play(args: argparse.Namespace) -> int:
-    engine = build_engine(args.engine, rom=args.rom, seed=args.seed)
+    engine = build_engine(args.engine, rom=args.rom, seed=engine_seed(args.agent, args.seed))
+    script = engine.walkthrough() if args.agent == "scripted" else None
+    if args.agent == "scripted" and args.engine != "mock" and not script:
+        print("no verified walkthrough for this game — scripted needs one", file=sys.stderr)
+        return 2
+    if script:
+        # A replay runs to its end; the budget is for agents that explore.
+        args.turns = max(args.turns, len(script) + 20)
     agent = build_agent(
-        args.agent, seed=args.seed, model=args.model, effort=args.effort,
+        args.agent, commands=script, seed=args.seed, model=args.model, effort=args.effort,
         history_turns=args.history_turns, info_level=args.info_level,
     )
     bus = EventBus()
