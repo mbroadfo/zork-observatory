@@ -7,9 +7,10 @@ import asyncio
 import sys
 from pathlib import Path
 
-from .agents import build_agent
+from .agents import AGENTS, RECALL_MODES, build_agent, default_history, parse_think
 from .engine import build_engine, engine_seed
 from .events import Event, EventBus
+from .notebook import MODES as NOTEBOOK_MODES, Notebook
 from .session import Session, SessionConfig
 from .trace import TraceWriter, read_events, trace_header
 
@@ -17,9 +18,12 @@ from .trace import TraceWriter, read_events, trace_header
 def _add_run_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--engine", default="mock", choices=["mock", "jericho"])
     p.add_argument("--rom", default=None, help="path to a .z5/.z3 game file (jericho only)")
-    p.add_argument("--agent", default="random", choices=["random", "scripted", "human", "claude"])
-    p.add_argument("--model", default="claude-opus-5")
+    p.add_argument("--agent", default="random", choices=list(AGENTS))
+    p.add_argument("--model", default=None,
+                   help="claude: defaults to claude-opus-5. ollama: required, e.g. qwen3:8b")
     p.add_argument("--effort", default="medium", choices=["low", "medium", "high", "xhigh", "max"])
+    p.add_argument("--think", default="default",
+                   help="ollama only: default (the model's own), off, on, or low/medium/high")
     p.add_argument(
         "--info-level", default="parser", choices=["cold", "game", "parser", "coached"],
         help="how much the agent is told before it starts: cold (a bare terminal), "
@@ -37,11 +41,36 @@ def _add_run_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--no-agent-save", action="store_true",
                    help="withhold SAVE/RESTORE from the agent")
     p.add_argument("--seed", type=int, default=12345)
-    p.add_argument("--history-turns", type=int, default=30)
+    p.add_argument("--recall", default="transcript", choices=list(RECALL_MODES),
+                   help="LLM agents: transcript (a rolling window of raw exchanges) or episodic "
+                        "(every command filed under the heading it was typed at, with its reply "
+                        "and a count — see agents/episodic.py)")
+    p.add_argument("--history-turns", type=int, default=None,
+                   help="raw exchanges shown each turn (default: 30 for transcript, 1 for episodic)")
     p.add_argument("--trace", default=None, help="write a JSONL trace here")
+    p.add_argument("--runs", type=int, default=1,
+                   help="play this many runs back to back, each from the first move")
+    p.add_argument("--notebook", default="off", choices=list(NOTEBOOK_MODES),
+                   help="what crosses between runs: off (nothing), carry (the agent's own "
+                        "notes, kept per player and game under traces/notebooks), new "
+                        "(set the existing notebook aside and start another)")
 
 
 async def _play(args: argparse.Namespace) -> int:
+    if args.history_turns is None:
+        args.history_turns = default_history(args.recall)
+    runs = max(1, args.runs)
+    mode = args.notebook
+    for index in range(1, runs + 1):
+        series = {"index": index, "total": runs} if runs > 1 else None
+        code = await _play_once(args, mode, series)
+        if code:
+            return code
+        mode = "carry" if mode == "new" else mode
+    return 0
+
+
+async def _play_once(args: argparse.Namespace, notebook_mode: str, series: dict[str, int] | None) -> int:
     engine = build_engine(args.engine, rom=args.rom, seed=engine_seed(args.agent, args.seed))
     script = engine.walkthrough() if args.agent == "scripted" else None
     if args.agent == "scripted" and args.engine != "mock" and not script:
@@ -50,16 +79,34 @@ async def _play(args: argparse.Namespace) -> int:
     if script:
         # A replay runs to its end; the budget is for agents that explore.
         args.turns = max(args.turns, len(script) + 20)
-    agent = build_agent(
-        args.agent, commands=script, seed=args.seed, model=args.model, effort=args.effort,
-        history_turns=args.history_turns, info_level=args.info_level,
-    )
+    try:
+        agent = build_agent(
+            args.agent, commands=script, seed=args.seed, model=args.model, effort=args.effort,
+            history_turns=args.history_turns, info_level=args.info_level,
+            think=parse_think(args.think), recall=args.recall,
+        )
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        engine.close()
+        return 2
+    preflight = getattr(agent, "preflight", None)
+    problem = await preflight() if preflight else None
+    if problem:
+        print(problem, file=sys.stderr)
+        engine.close()
+        return 2
     bus = EventBus()
 
     def printer(event: Event) -> None:
         p = event.payload
         if event.type == "session.started":
-            print(f"=== {p['game']} · {p['agent']} · max score {p['max_score']} ===\n")
+            run = f" · run {p['series']['index']}/{p['series']['total']}" if p.get("series") else ""
+            print(f"=== {p['game']} · {p['agent']} · max score {p['max_score']}{run} ===")
+            nb = p.get("notebook")
+            if nb:
+                print(f"  \033[33m✎ notebook {nb['path']}: {nb['notes']} note(s) from "
+                      f"{nb['runs'] - 1} earlier run(s)\033[0m")
+            print()
         elif event.type == "agent.thought":
             print(f"  \033[2m{p['text']}\033[0m")
         elif event.type == "command.issued":
@@ -103,7 +150,20 @@ async def _play(args: argparse.Namespace) -> int:
             print(f"  \033[31m[{p['where']}] {p['message']}\033[0m")
 
     bus.subscribe(printer)
-    trace = TraceWriter(args.trace, meta={"game": engine.name, "agent": agent.name}) if args.trace else None
+    trace_path = args.trace
+    if trace_path and series:
+        base = Path(trace_path)
+        trace_path = base.with_name(f"{base.stem}-run{series['index']}{base.suffix}")
+    trace = (
+        TraceWriter(trace_path, meta={"game": engine.name, "agent": agent.name, "series": series})
+        if trace_path else None
+    )
+    notebook = None
+    if notebook_mode != "off":
+        notebook = Notebook.open(
+            Path("traces") / "notebooks", engine.story or engine.name, agent.name,
+            fresh=notebook_mode == "new",
+        )
 
     session = Session(
         engine, agent, bus,
@@ -116,6 +176,8 @@ async def _play(args: argparse.Namespace) -> int:
             history_turns=args.history_turns,
         ),
         trace=trace,
+        notebook=notebook,
+        series=series,
     )
     await session.run()
     engine.close()
@@ -124,7 +186,14 @@ async def _play(args: argparse.Namespace) -> int:
         print("\n--- what it wrote down and kept ---")
         for lesson in agent.memory.lessons:
             where = f", {lesson.location}" if lesson.location else ""
-            print(f"  life {lesson.life} (turn {lesson.turn}{where}): {lesson.text}")
+            run = f"run {lesson.run}, " if lesson.run else ""
+            print(f"  {run}life {lesson.life} (turn {lesson.turn}{where}): {lesson.text}")
+    if notebook and len(notebook.runs) > 1:
+        print("\n--- the notebook's runs so far ---")
+        for r in notebook.runs:
+            print(f"  run {r['run']}: {r.get('reason', '?')} · score {r.get('score', '?')} "
+                  f"in {r.get('turns', '?')} turns · {r.get('deaths', 0)} death(s)")
+    print()
     return 0
 
 
@@ -149,7 +218,12 @@ def _serve(args: argparse.Namespace) -> int:
     import uvicorn
 
     print(f"Observatory at http://{args.host}:{args.port}")
-    uvicorn.run("observatory.server:app", host=args.host, port=args.port, reload=args.reload)
+    # An open browser tab holds a WebSocket that never closes on its own, and
+    # without a deadline a --reload waits on it forever with the port dead.
+    uvicorn.run(
+        "observatory.server:app", host=args.host, port=args.port, reload=args.reload,
+        timeout_graceful_shutdown=3,
+    )
     return 0
 
 

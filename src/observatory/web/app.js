@@ -507,9 +507,26 @@ function addThought(text, meta) {
     if (meta.model) bits.push(meta.model);
     if (meta.latency_ms) bits.push(`${meta.latency_ms} ms`);
     if (meta.cost_usd) bits.push(`$${meta.cost_usd.toFixed(4)}`);
+    if (meta.output_tokens) bits.push(`${meta.input_tokens || 0} → ${meta.output_tokens} tok`);
+    if (meta.thinking_chars) bits.push(`thought ${meta.thinking_chars} chars`);
+    if (meta.overran) bits.push(`⚠ thinking ran past ${meta.overrun_tokens} tokens — this move made without thinking`);
+    if (meta.load_ms) bits.push(`loaded in ${(meta.load_ms / 1000).toFixed(1)} s`);
+    if (meta.unstructured) bits.push("free-form reply");
     if (meta.cache_read_tokens) bits.push(`${meta.cache_read_tokens} cached`);
     m.textContent = bits.join("  ·  ");
+    // The hidden deliberation, on hover; it is in the trace either way.
+    if (meta.thinking) m.title = meta.thinking.length > 4000 ? meta.thinking.slice(-4000) : meta.thinking;
     el.appendChild(m);
+  }
+  if (meta && meta.record_stats) {
+    // What the episodic player had in front of it this turn, on hover: when it
+    // repeats itself, whether the repeat was on the page is the question.
+    const r = document.createElement("span");
+    r.className = "meta";
+    const s = meta.record_stats;
+    r.textContent = `record: ${s.headings} headings · ${s.entries} commands · ${s.repeats} repeats`;
+    r.title = meta.record || "(empty)";
+    el.appendChild(r);
   }
   if (!state.showThoughts) el.style.display = "none";
   append(el);
@@ -831,6 +848,7 @@ function renderMemory(lessons) {
   el.innerHTML = lessons
     .map((l) => {
       const where = [
+        l.run ? `run ${l.run}` : null,
         `life ${l.life}`,
         `turn ${l.turn}`,
         l.location || null,
@@ -893,13 +911,33 @@ function handle(event) {
   switch (event.type) {
     case "session.started":
       resetView();
-      note(`▸ ${p.game} · ${p.agent} · max score ${p.max_score}`);
+      note(
+        `▸ ${p.game} · ${p.agent} · max score ${p.max_score}` +
+          (p.series ? ` · run ${p.series.index} of ${p.series.total}` : "")
+      );
+      if (p.notebook) {
+        const earlier = p.notebook.runs - 1;
+        note(
+          `✎ notebook: ${p.notebook.notes} note(s) from ${earlier} earlier run(s)` +
+            (earlier
+              ? " — " + p.notebook.history.slice(0, -1)
+                  .map((r) => `run ${r.run}: ${r.score ?? "?"} pts in ${r.turns ?? "?"} turns`)
+                  .join(", ")
+              : "")
+        );
+      }
+      state.memory = p.memory || [];
+      renderMemory(state.memory);
+      // A chained run is started by the server, not by a click here; pick up
+      // whether it is running once it has been set going.
+      if (p.series && p.series.index > 1) setTimeout(refresh, 400);
       Chart.load(p.story).then(() => setView(preferredView));
       break;
 
     case "agent.thought":
       addThought(p.text, p.meta);
       if (p.meta && p.meta.cost_usd) accrueCost(p.meta.cost_usd);
+      if (p.meta) accrueTokens(p.meta.input_tokens, p.meta.output_tokens);
       break;
 
     case "command.issued":
@@ -989,11 +1027,15 @@ function handle(event) {
         `■ ${p.reason} — ${p.final_score}/${p.max_score} in ${p.turns} turns · ` +
           `${p.deaths || 0} death(s) · ` +
           `${p.map.rooms} rooms, ${p.map.edges} edges, ${p.map.blocked} blocked` +
-          (u.calls ? ` · $${u.cost_usd} over ${u.calls} calls` : "")
+          (u.calls ? ` · $${u.cost_usd} over ${u.calls} calls, ` +
+            `${fmtTokens(u.input_tokens || 0)} in / ${fmtTokens(u.output_tokens || 0)} out` : "")
       );
       if (p.censored) {
         // Not an outcome. Saying so here stops the run being read as a failure.
         note("  ⚠ stopped by the harness, not the game — this run is censored, not finished", true);
+      }
+      if (p.series && p.series.index < p.series.total) {
+        note(`  ↻ run ${p.series.index + 1} of ${p.series.total} starts next, carrying only the notebook`);
       }
       setRunning(false, true);
       refresh();
@@ -1004,6 +1046,21 @@ function handle(event) {
       note(`✕ ${p.where}: ${p.message}`, true);
       break;
   }
+}
+
+let tokensIn = 0;
+let tokensOut = 0;
+function fmtTokens(n) {
+  return n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e4 ? `${Math.round(n / 1e3)}k` : String(n);
+}
+function showTokens() {
+  $("r-tokens").textContent = tokensIn || tokensOut ? `${fmtTokens(tokensIn)} / ${fmtTokens(tokensOut)}` : "0";
+}
+function accrueTokens(inp, out) {
+  if (!inp && !out) return;
+  tokensIn += inp || 0;
+  tokensOut += out || 0;
+  showTokens();
 }
 
 let costTotal = 0;
@@ -1035,6 +1092,9 @@ function resetView() {
   $("inv-count").textContent = "";
   state.current = null;
   costTotal = 0;
+  tokensIn = 0;
+  tokensOut = 0;
+  showTokens();
   entryCount = 0;
   fitted = false;
   cy.elements().remove();
@@ -1123,6 +1183,11 @@ function applySummary(s) {
   renderQuality(s.quality);
   renderCoverage(s.coverage);
   $("r-deaths").textContent = s.deaths || 0;
+  if (s.usage && (s.usage.input_tokens || s.usage.output_tokens)) {
+    tokensIn = s.usage.input_tokens || 0;
+    tokensOut = s.usage.output_tokens || 0;
+    showTokens();
+  }
   if (s.usage && s.usage.cost_usd) {
     costTotal = s.usage.cost_usd;
     $("r-cost").textContent = `$${costTotal.toFixed(costTotal < 1 ? 4 : 2)}`;
@@ -1143,11 +1208,50 @@ function setRunning(running, finished) {
 
 function syncAgentControls() {
   const agent = $("agent").value;
-  const llm = agent === "claude";
-  $("model").style.display = llm ? "" : "none";
-  $("effort").style.display = llm ? "" : "none";
-  $("info").style.display = llm ? "" : "none";
+  const claude = agent === "claude";
+  const local = agent === "ollama";
+  $("model").style.display = claude ? "" : "none";
+  $("effort").style.display = claude ? "" : "none";
+  $("omodel").style.display = local ? "" : "none";
+  $("think").style.display = local ? "" : "none";
+  $("info").style.display = claude || local ? "" : "none";
+  $("recall").style.display = claude || local ? "" : "none";
+  $("notebook").style.display = claude || local ? "" : "none";
   $("input-row").classList.toggle("on", agent === "human");
+  if (local) loadLocalModels();
+}
+
+// Whatever the local server has pulled, smallest first. Asked each time the
+// picker is shown, so a model pulled mid-session appears without a reload.
+async function loadLocalModels() {
+  const sel = $("omodel");
+  const keep = sel.value || prefs.read("omodel", "");
+  let data;
+  try {
+    data = await (await fetch("/api/ollama/models")).json();
+  } catch (e) {
+    data = { models: [], error: String(e) };
+  }
+  sel.innerHTML = "";
+  for (const m of data.models || []) {
+    const o = document.createElement("option");
+    o.value = m.name;
+    const gb = m.size ? ` · ${(m.size / 1e9).toFixed(1)} GB` : "";
+    o.textContent = `${m.name}${gb}`;
+    o.title = [m.family, m.parameter_size, m.quantization].filter(Boolean).join(" · ");
+    sel.appendChild(o);
+  }
+  if (!sel.options.length) {
+    const o = document.createElement("option");
+    o.value = "";
+    o.textContent = data.error ? "ollama unreachable" : "no models pulled";
+    o.title = data.error || "docker compose exec ollama ollama pull qwen3:8b";
+    sel.appendChild(o);
+    if (data.error) note(`✕ ollama: ${data.error}`, true);
+    else note("no local models yet — docker compose exec ollama ollama pull qwen3:8b", true);
+  } else if ([...sel.options].some((o) => o.value === keep)) {
+    sel.value = keep;
+  }
 }
 
 function syncEngineControls() {
@@ -1155,16 +1259,22 @@ function syncEngineControls() {
 }
 
 $("agent").onchange = syncAgentControls;
+$("omodel").onchange = () => prefs.write("omodel", $("omodel").value);
 $("engine").onchange = syncEngineControls;
 
 $("new-run").onclick = async () => {
   resetView();
+  const llm = ["claude", "ollama"].includes($("agent").value);
   const body = {
+    recall: llm ? $("recall").value : "transcript",
+    runs: parseInt($("runs").value, 10) || 1,
+    notebook: llm ? $("notebook").value : "off",
     engine: $("engine").value,
     rom: $("rom").value || null,
     agent: $("agent").value,
-    model: $("model").value,
+    model: $("agent").value === "ollama" ? $("omodel").value : $("model").value,
     effort: $("effort").value,
+    think: $("think").value,
     info_level: $("info").value,
     max_turns: parseInt($("turns").value, 10) || 200,
     lives: parseInt($("lives").value, 10) || 0,

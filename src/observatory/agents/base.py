@@ -27,6 +27,9 @@ class TurnContext:
     valid_actions: list[str] | None = None
     life: int = 1          # how many times the world has been restarted under it
     lives_left: int = 0
+    # Where the reader of a reflection starts: "checkpoint" (a rollback in this
+    # run) or "beginning" (the next run, carrying only the notebook).
+    next_start: str = "checkpoint"
 
 
 @dataclass

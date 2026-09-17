@@ -25,12 +25,19 @@
       <option value="random">random</option>
       <option value="scripted" title="The game's own winning walkthrough — a reference, not a player">scripted — walkthrough</option>
       <option value="claude">claude</option>
+      <option value="ollama" title="A local model served by Ollama — free per token">ollama — local</option>
       <option value="human">human</option>
     </select>
     <select id="model" title="Model" style="display:none">
       <option value="claude-opus-5">opus 5</option>
       <option value="claude-sonnet-5">sonnet 5</option>
       <option value="claude-haiku-4-5">haiku 4.5</option>
+    </select>
+    <select id="omodel" title="Local model (pulled into Ollama)" style="display:none"></select>
+    <select id="think" title="Whether the local model thinks before answering" style="display:none">
+      <option value="default" selected>thinking: model default</option>
+      <option value="off">thinking: off</option>
+      <option value="on">thinking: on</option>
     </select>
     <select id="effort" title="Thinking effort" style="display:none">
       <option value="low">low</option>
@@ -43,6 +50,10 @@
       <option value="parser" selected>parser — interface explained</option>
       <option value="coached">coached — hints (control arm)</option>
     </select>
+    <select id="recall" title="What the model is shown of the past each turn" style="display:none">
+      <option value="transcript" selected title="The last 30 exchanges, verbatim">recall: transcript</option>
+      <option value="episodic" title="Every command filed under the heading it was typed at, with its reply and a count; plus the last exchange">recall: episodic record</option>
+    </select>
     <input type="number" id="turns" value="200" min="1" max="5000" size="4"
            title="Turn BUDGET — the game has no turn limit. Runs stopped by it are marked censored." style="width:70px">
     <select id="lives" title="Times the world may be rolled back after a death. The agent keeps its memory across a rollback.">
@@ -50,6 +61,17 @@
       <option value="1">1 life</option>
       <option value="3">3 lives</option>
       <option value="10">10 lives</option>
+    </select>
+    <select id="runs" title="Play this many runs back to back, each from the first move with a fresh agent">
+      <option value="1" selected>1 run</option>
+      <option value="3">3 runs</option>
+      <option value="5">5 runs</option>
+      <option value="10">10 runs</option>
+    </select>
+    <select id="notebook" title="What crosses from one run to the next. Only the agent's own notes ever do — no map, no transcript." style="display:none">
+      <option value="off" selected>notebook: none</option>
+      <option value="carry">notebook: carry on</option>
+      <option value="new">notebook: start new</option>
     </select>
     <button id="new-run" class="primary">New run</button>
   </div>
@@ -72,6 +94,7 @@
     <div class="readout"><span class="label">Turn</span><span class="value" id="r-turn">0</span></div>
     <div class="readout"><span class="label">Deaths</span><span class="value" id="r-deaths">0</span></div>
     <div class="readout"><span class="label">Cost</span><span class="value" id="r-cost">$0.00</span></div>
+    <div class="readout" title="Tokens in / out — counted even when inference is free"><span class="label">Tokens</span><span class="value" id="r-tokens">0</span></div>
     <div class="readout"><span class="label">Link</span><span class="value" id="r-link">·</span></div>
   </div>
 </header>

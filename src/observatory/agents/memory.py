@@ -43,13 +43,19 @@ class Lesson:
 
     text: str
     turn: int
-    kind: str = "death"        # "death" | "note" | "milestone"
+    kind: str = "death"        # "death" | "run" (the run ended) | "note"
     location: str = ""
     life: int = 1
+    run: int = 0               # which run of a notebook wrote it; 0 = no notebook
     ts: float = field(default_factory=time.time)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Lesson":
+        known = cls.__dataclass_fields__
+        return cls(**{k: v for k, v in data.items() if k in known})
 
 
 class AgentMemory:
@@ -62,12 +68,14 @@ class AgentMemory:
     def __len__(self) -> int:
         return len(self.lessons)
 
-    def add(self, text: str, turn: int, kind: str = "death", location: str = "", life: int = 1) -> Lesson | None:
+    def add(
+        self, text: str, turn: int, kind: str = "death", location: str = "", life: int = 1, run: int = 0,
+    ) -> Lesson | None:
         """Record a lesson. Returns None if there was nothing to record."""
         text = " ".join((text or "").split())[:MAX_LESSON_CHARS].strip()
         if not text:
             return None
-        lesson = Lesson(text=text, turn=turn, kind=kind, location=location, life=life)
+        lesson = Lesson(text=text, turn=turn, kind=kind, location=location, life=life, run=run)
         self.lessons.append(lesson)
         return lesson
 
@@ -87,7 +95,8 @@ class AgentMemory:
         ]
         for i, lesson in enumerate(recent, start=1):
             where = f" ({lesson.location})" if lesson.location else ""
-            lines.append(f"{i}. [turn {lesson.turn}{where}] {lesson.text}")
+            run = f"run {lesson.run}, " if lesson.run else ""
+            lines.append(f"{i}. [{run}turn {lesson.turn}{where}] {lesson.text}")
         if len(self.lessons) > len(recent):
             lines.append(f"(+{len(self.lessons) - len(recent)} older notes not shown)")
         return "\n".join(lines)
@@ -114,5 +123,18 @@ Write at most two sentences to your future self, who will start again from an \
 earlier point with everything you are about to say and nothing else you have \
 learned. Say what you believe happened and what, if anything, you intend to do \
 differently.
+
+Write only those sentences. No preamble."""
+
+# The same question at the end of a run that will be followed by a fresh one.
+# The future self here starts from nothing but the notebook, and is told so.
+# Nothing says why the run ended: running out of turns, dying and winning all
+# get the same words, and what the agent makes of its ending is its own.
+REFLECT_RESTART = """That run is over.
+
+Write at most two sentences to your future self, who will start again from the \
+very beginning with everything you are about to say and nothing else you have \
+learned. Say what you believe you have learned and what, if anything, you \
+intend to do differently.
 
 Write only those sentences. No preamble."""

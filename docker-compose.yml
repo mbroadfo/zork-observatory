@@ -14,4 +14,33 @@ services:
     environment:
       # Read from the host shell; leave unset to run the free agents only.
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # The local model server below. To use an Ollama installed on the host
+      # instead, set OLLAMA_HOST=http://host.docker.internal:11434.
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://ollama:11434}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     command: ["observatory", "serve", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+  # Local models, on the GPU. Free per token; pull models once with
+  #   docker compose exec ollama ollama pull qwen3:8b
+  # Weights live in a named volume, so they survive rebuilds.
+  ollama:
+    image: ollama/ollama:0.13.5
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama:/root/.ollama
+    environment:
+      # One model in memory at a time; a consumer card rarely has room for two.
+      - OLLAMA_MAX_LOADED_MODELS=1
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+
+volumes:
+  ollama:

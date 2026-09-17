@@ -14,8 +14,9 @@ import json
 import time
 from typing import Any
 
-from . import memory, prompts
+from . import llm, prompts
 from .base import Agent, AgentAction, TurnContext
+from .episodic import EpisodicMemory
 
 # How much the agent is told is an experimental variable — see prompts.py for
 # the ladder and for why "cold" does not produce a naive player. Every level
@@ -30,27 +31,7 @@ SYSTEM_FINGERPRINT = hashlib.sha256(SYSTEM.encode()).hexdigest()[:12]
 
 # Output stays deliberately small — this is called once per turn, hundreds of
 # times per run, and a chatty schema is the difference between a $2 run and $30.
-MOVE_SCHEMA = {
-    "type": "json_schema",
-    "schema": {
-        "type": "object",
-        "properties": {
-            # Phrased without presupposing rooms, objects or a parser — at the
-            # "cold" rung the agent has not established that any of those exist,
-            # and a schema that assumes them would leak the answer.
-            "reasoning": {
-                "type": "string",
-                "description": "Two or three sentences: what you currently believe, and what you are trying next.",
-            },
-            "command": {
-                "type": "string",
-                "description": "The single line of text to type next.",
-            },
-        },
-        "required": ["reasoning", "command"],
-        "additionalProperties": False,
-    },
-}
+MOVE_SCHEMA = {"type": "json_schema", "schema": llm.MOVE_FIELDS}
 
 # USD per million tokens (input, output).
 PRICING: dict[str, tuple[float, float]] = {
@@ -91,16 +72,24 @@ class ClaudeAgent(Agent):
         max_tokens: int = 2000,
         info_level: str = DEFAULT_INFO_LEVEL,
         api_key: str | None = None,
+        recall: str = "transcript",
     ) -> None:
         import anthropic
 
+        llm.default_history(recall)   # validates
         self.model = model
         self.effort = effort
         self.history_turns = history_turns
         self.max_tokens = max_tokens
         self.info_level = info_level
+        self.recall = recall
+        self.episodes = EpisodicMemory() if recall == "episodic" else None
         self.system = prompts.get(info_level)
-        self.name = f"claude:{model}" + ("" if info_level == DEFAULT_INFO_LEVEL else f"/{info_level}")
+        self.name = (
+            f"claude:{model}"
+            + ("" if info_level == DEFAULT_INFO_LEVEL else f"/{info_level}")
+            + ("" if recall == "transcript" else f"+{recall}")
+        )
         self._client = anthropic.AsyncAnthropic(api_key=api_key) if api_key else anthropic.AsyncAnthropic()
         self._totals = {
             "input_tokens": 0,
@@ -113,36 +102,26 @@ class ClaudeAgent(Agent):
 
     # --- prompt ----------------------------------------------------------
 
-    def _messages(self, ctx: TurnContext) -> list[dict[str, Any]]:
-        """One user turn carrying a windowed transcript.
-
-        A rolling window rather than the whole history: past a few dozen turns
-        the early transcript stops informing the next move and starts costing
-        real money. Raise `history_turns` if you want the model to have more
-        rope; it is the single biggest cost lever here.
-        """
-        lines = []
-
-        # The memory goes first and outside the transcript window. It is the
-        # one thing that must not scroll off — it is what the agent kept when
-        # the world was rolled back, and dropping it silently would make every
-        # death teach nothing.
-        remembered = self.memory.render()
-        if remembered:
-            lines.append(remembered)
-            lines.append("")
-
-        for command, response in ctx.transcript[-self.history_turns:]:
-            if command:
-                lines.append(f"> {command}")
-            lines.append(response.strip())
-        lines.append(f"\n[Turn {ctx.turn}. Score {ctx.score}. Moves {ctx.moves}.]")
-        lines.append("What is your next command?")
-        return [{"role": "user", "content": "\n".join(lines)}]
+    def _messages(self, ctx: TurnContext, record: str = "") -> list[dict[str, Any]]:
+        """The windowed transcript; `history_turns` is the single biggest cost
+        lever here. The wording lives in llm.py, shared with every model."""
+        return [{"role": "user", "content": llm.turn_prompt(self.memory, ctx, self.history_turns, record)}]
 
     # --- play ------------------------------------------------------------
 
     async def act(self, ctx: TurnContext) -> AgentAction:
+        record = ""
+        if self.episodes is not None:
+            self.episodes.before_move(ctx)
+            record = self.episodes.render()
+        action = await self._act(ctx, record)
+        if self.episodes is not None:
+            action.meta["record"] = record
+            action.meta["record_stats"] = self.episodes.summary()
+            self.episodes.after_move(action.command)
+        return action
+
+    async def _act(self, ctx: TurnContext, record: str) -> AgentAction:
         import anthropic
 
         started = time.perf_counter()
@@ -158,7 +137,7 @@ class ClaudeAgent(Agent):
                     }
                 ],
                 output_config={"effort": self.effort, "format": MOVE_SCHEMA},
-                messages=self._messages(ctx),
+                messages=self._messages(ctx, record),
             )
         except anthropic.APIStatusError as exc:
             return AgentAction(
@@ -186,7 +165,7 @@ class ClaudeAgent(Agent):
         text = next((b.text for b in response.content if b.type == "text"), "")
         try:
             data = json.loads(text)
-            command = str(data.get("command", "look")).strip()
+            command = llm.clean_command(str(data.get("command", "look")))
             reasoning = str(data.get("reasoning", "")).strip()
         except (json.JSONDecodeError, AttributeError):
             command, reasoning = "look", f"[unparseable response: {text[:200]}]"
@@ -215,25 +194,15 @@ class ClaudeAgent(Agent):
         """
         import anthropic
 
-        lines = []
-        remembered = self.memory.render()
-        if remembered:
-            lines.append(remembered)
-            lines.append("")
-        for command, response in ctx.transcript[-12:]:
-            if command:
-                lines.append(f"> {command}")
-            lines.append(response.strip())
-        lines.append("")
-        lines.append(memory.REFLECT)
-
+        if self.episodes is not None:
+            self.episodes.before_reflection(ctx)
         try:
             response = await self._client.messages.create(
                 model=self.model,
                 max_tokens=400,
                 system=[{"type": "text", "text": self.system, "cache_control": {"type": "ephemeral"}}],
                 output_config={"effort": self.effort},
-                messages=[{"role": "user", "content": "\n".join(lines)}],
+                messages=[{"role": "user", "content": llm.reflection_prompt(self.memory, ctx)}],
             )
         except (anthropic.APIStatusError, anthropic.APIConnectionError):
             return None
@@ -257,6 +226,7 @@ class ClaudeAgent(Agent):
             "model": self.model,
             "effort": self.effort,
             "history_turns": self.history_turns,
+            "recall": getattr(self, "recall", "transcript"),
             "max_tokens": self.max_tokens,
             "info_level": self.info_level,
             "system_prompt": self.system,

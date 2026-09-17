@@ -21,6 +21,7 @@ from typing import Any
 from .agents.base import Agent, TurnContext
 from .engine.base import GameEngine, Observation, WorldState  # noqa: F401  (Observation is constructed here)
 from .events import EventBus
+from .notebook import Notebook
 from .trace import TraceWriter
 from .world.coverage import Coverage
 from .world.discovery import DiscoveryLedger, Turn as DiscoveryTurn
@@ -91,6 +92,8 @@ class Session:
         bus: EventBus,
         config: SessionConfig | None = None,
         trace: TraceWriter | None = None,
+        notebook: Notebook | None = None,
+        series: dict[str, int] | None = None,
     ) -> None:
         self.id = uuid.uuid4().hex[:12]
         self.engine = engine
@@ -98,6 +101,12 @@ class Session:
         self.bus = bus
         self.config = config or SessionConfig()
         self.trace = trace
+        # Carried between runs; None means this run starts and ends with
+        # nothing. See notebook.py.
+        self.notebook = notebook
+        self.run_number = 0
+        self.series = series    # {"index": i, "total": n} when runs are chained
+        self._final_reflection_done = False
 
         self.map = MapGraph()
         self.ledger = DiscoveryLedger()
@@ -140,6 +149,10 @@ class Session:
             return
         self.started = True
         obs, state = self.engine.reset()
+        notebook = None
+        if self.notebook:
+            self.run_number = self.notebook.begin_run(self.agent.memory, session=self.id)
+            notebook = self.notebook.summary()
 
         self._emit(
             "session.started",
@@ -150,6 +163,9 @@ class Session:
             agent_config=self.agent.describe(),
             max_score=self.engine.max_score,
             config={"max_turns": self.config.max_turns},
+            notebook=notebook,
+            series=self.series,
+            memory=self.agent.memory.to_dict(),
         )
         self._ingest(command="", obs=obs, state=state)
         await self.agent.on_start(obs.text)
@@ -343,7 +359,8 @@ class Session:
             observation=self.transcript[-1][1] if self.transcript else "",
             score=self._last_state.score if self._last_state else 0,
             moves=self._last_state.moves if self._last_state else 0,
-            transcript=self.transcript[-self.config.history_turns:],
+            # [-0:] is the whole list; a window of zero means no history.
+            transcript=self.transcript[-self.config.history_turns:] if self.config.history_turns > 0 else [],
             valid_actions=self.engine.valid_actions() if self.config.collect_valid_actions else None,
             life=self.life,
             lives_left=self.lives_left,
@@ -396,10 +413,10 @@ class Session:
         world goes back; the memory does not.
         """
         if self.lives_left <= 0:
-            await self._record_lesson(obs, final=True)
+            await self._record_lesson(obs.text, final=True)
             return False
 
-        await self._record_lesson(obs, final=False)
+        await self._record_lesson(obs.text, final=False)
 
         # The agent's own save wins: it chose that point, and second-guessing
         # a deliberate choice would make SAVE mean something other than save.
@@ -421,9 +438,15 @@ class Session:
         )
         return True
 
-    async def _record_lesson(self, obs: Observation, final: bool) -> None:
+    async def _record_lesson(self, cause: str, final: bool, kind: str = "death") -> None:
+        ctx = self._context()
+        if final:
+            self._final_reflection_done = True
+            if self.notebook:
+                # The reader is the next run, which starts from the first move.
+                ctx.next_start = "beginning"
         try:
-            text = await self.agent.reflect(self._context(), cause=obs.text)
+            text = await self.agent.reflect(ctx, cause=cause)
         except Exception as exc:
             self._emit("error", where="agent.reflect", message=f"{type(exc).__name__}: {exc}")
             return
@@ -432,10 +455,13 @@ class Session:
         lesson = self.agent.memory.add(
             text,
             turn=self.turn,
-            kind="death",
+            kind=kind,
             location=self._last_state.location_name if self._last_state else "",
             life=self.life,
+            run=self.run_number,
         )
+        if lesson and self.notebook:
+            self.notebook.add(lesson)
         if lesson:
             self._emit("lesson.learned", **lesson.to_dict(), final=final, deaths=self.deaths)
 
@@ -511,10 +537,22 @@ class Session:
     async def _finish(self, reason: str, censored: bool = False) -> None:
         if self.finished:
             return
+        # A run that will be followed by another gets the last word, whatever
+        # ended it — unless the agent itself is what broke.
+        if self.notebook and not self._final_reflection_done and not reason.startswith("agent error"):
+            await self._record_lesson(reason, final=True, kind="run")
         self.finished = True
         self.end_reason = reason
         self.censored = censored
         state = self._last_state
+        if self.notebook:
+            self.notebook.end_run(
+                reason=reason, censored=censored, turns=self.turn, steps=self.steps,
+                deaths=self.deaths, score=state.score if state else 0,
+                max_score=state.max_score if state else 0,
+                rooms=self.map.stats()["rooms"], usage=self.agent.usage(),
+                trace=str(self.trace.path) if self.trace else None,
+            )
         self._emit(
             "session.ended",
             reason=reason,
@@ -535,6 +573,8 @@ class Session:
             coverage=self.coverage.summary(),
             vocabulary=self.vocabulary.summary(),
             usage=self.agent.usage(),
+            notebook=self.notebook.summary() if self.notebook else None,
+            series=self.series,
         )
         await self.agent.on_end(reason)
         if self.trace:
@@ -612,6 +652,9 @@ class Session:
             "life": self.life,
             "lives_left": self.lives_left,
             "memory": self.agent.memory.to_dict(),
+            "notebook": self.notebook.summary() if self.notebook else None,
+            "run_number": self.run_number,
+            "series": self.series,
             "score": state.score if state else 0,
             "max_score": state.max_score if state else self.engine.max_score,
             "location": state.location_name if state else "",

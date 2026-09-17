@@ -102,6 +102,92 @@ terminal to an openly coached player:
 observatory play --agent claude --info-level cold --turns 60
 ```
 
+### Playing with a local model
+
+`docker compose up` also starts [Ollama](https://ollama.com) on the GPU. Local
+inference is free per token, so hundreds of runs cost electricity and nothing
+else. Pull a model once; the weights live in a named volume:
+
+```bash
+docker compose exec ollama ollama pull qwen3:8b
+docker compose exec observatory observatory play --engine jericho     --rom roms/zork1.z5 --agent ollama --model qwen3:8b --turns 200
+```
+
+In the browser, pick **ollama — local**; the model list is whatever the server
+has pulled. A local player receives exactly the same words as Claude, since
+prompts, transcript window and memory are assembled in one place
+(`agents/llm.py`). The difference is the transport and three settings a hosted
+API would choose for you, all recorded in the trace:
+
+- **Context window.** Ollama's default is 4096 tokens, and it cuts an
+  over-long prompt from the front without saying so. That would drop the
+  system prompt and the memory first. The agent asks for 16k.
+- **Sampling.** Temperature 0.7, seeded from `--seed`, so a run can be
+  repeated.
+- **The model itself.** A tag like `qwen3:8b` changes when the library is
+  updated; the digest doesn't, so the digest goes into the trace.
+
+`--think` (`default`, `off`, `on`, or `low`/`medium`/`high` for models that
+grade it) controls whether the model reasons before answering. Tokens are
+counted on every turn even though nothing is billed, because how much
+inference a player needed is a measurement in its own right.
+
+To use an Ollama installed on the host instead of the container, set
+`OLLAMA_HOST=http://host.docker.internal:11434` before `docker compose up`.
+
+### Transcript recall versus an episodic record
+
+A bare 8B model walks the same forest paths again and again and types `north`
+at the same wall eleven times. It does have the transcript, but reading back
+through eighty exchanges before every move is exactly what a small model does
+badly. `--recall` changes the shape of the past it is shown and nothing else:
+
+```bash
+observatory play ... --agent ollama --model qwen3:8b --recall transcript   # 30 raw exchanges (the baseline)
+observatory play ... --agent ollama --model qwen3:8b --recall episodic     # a filed record + the last exchange
+```
+
+The episodic record files every command under the heading the text was
+showing when it was typed, along with the reply it got and how many times it
+was typed there:
+
+```text
+Latest reply to your inventory command (12 commands ago): "You are carrying: A pile of leaves"
+
+Under the current heading, Clearing, shown 26 times:
+  > take grating ×20 (last just now) → "A valiant attempt." ×5 (latest) · "What a concept!" ×5 · ...
+  > n ×2 (last 30 commands ago) → "The forest becomes impenetrable to the north."
+  > w ×6 (last 8 commands ago) → heading Forest ×5 (latest) · heading Behind House ×1
+Under other headings, most recent first:
+  Forest Path, shown 28 times: > n ×22 → heading Clearing; > w → heading Forest; ...
+```
+
+Every distinct reply is listed with its count. An earlier version showed only
+the latest reply and a "replies varied" flag, which turned twenty refusals of
+`take grating` (Zork rotates its refusal quips) into something that looked
+like an action that might yet work. The inventory line appears only after the
+player has typed an inventory command itself, and it quotes the game's reply.
+Nothing the model says ever enters the record. Its reasoning is shown in the
+observatory but never fed back to it, so a false belief in a thought such as
+"I'm carrying the grating" is re-derived each turn from a record that says
+otherwise.
+
+It is built only from text the player saw (`agents/episodic.py`), so it is the
+player's memory and not the observatory's map. Places are keyed by the printed
+heading, never by the engine's room id, so Zork's five rooms called "Forest"
+are as ambiguous here as they are on screen. Replies are stored verbatim and
+never labelled "blocked" or "dead end", because whether four refusals are
+enough is the player's call. `n` and `north` are kept apart, since learning
+that they mean the same thing is a discovery the ledger measures.
+
+The comparison this sets up: the same model, prompt, seed and game, with only
+the recall changed. If the episodic player stops repeating itself, the
+limitation was the memory architecture, not the model's reasoning. Its
+agent name carries a `+episodic` suffix, so it keeps its own notebook. Each
+turn's record goes into the trace, and in the browser you can hover the
+`record:` line under a thought to see it, so a repeated command can be checked
+against what the model had in front of it.
+
 ## How it fits together
 
 ```text
@@ -341,6 +427,33 @@ agent's own words, verbatim, and they travel in the trace — so comparing what
 different models wrote down after dying in the same place is a real artifact in
 a way comparing two scorelines never is.
 
+### Runs in a series, and the notebook
+
+A run that ends (budget, death, or victory) can be followed by another that
+starts from the first move with a fresh agent. The only thing carried across
+is the agent's notebook:
+
+```bash
+observatory play ... --agent ollama --model qwen3:8b --runs 5 --notebook new
+```
+
+- `--notebook carry` continues the notebook for this player and game, stored at
+  `traces/notebooks/<story>/<player>.json`. `new` sets the existing notebook
+  aside (it is renamed, never deleted) and starts another. `off`, the default,
+  carries nothing.
+- At the end of each run the agent is asked for at most two sentences to a
+  future self who "will start again from the very beginning". The question is
+  the same whatever ended the run. Death notes from within a run go into the
+  notebook too.
+- The notebook is keyed by the full player name (model, information level,
+  recall), so notes written under a coached prompt never reach an uncoached
+  player.
+- It records every run's result, so it reads as a lineage: what each run
+  believed and how far it got.
+
+In the browser the same options are the **runs** and **notebook** selectors.
+Chained runs start on their own after a two-second pause.
+
 ### Rewinding doesn't erase knowledge
 
 `Session.rewind()` restores the world to a checkpoint but leaves the map intact.
@@ -372,8 +485,10 @@ observatory replay traces/run.jsonl     # terminal
 src/observatory/
   engine/       backends: jericho (real games) · mock (tests, no ROM)
   world/        map graph built from observed transitions · object-tree diffing
-  agents/       random · scripted · human · claude
+  agents/       random · scripted · human · claude · ollama · llm.py (what every model is shown)
+                · memory.py (lessons) · episodic.py (the filed record)
   session.py    the turn loop and the checkpoint stack
+  notebook.py   what crosses from one run to the next
   events.py     the event bus
   trace.py      JSONL read/write
   server.py     FastAPI + WebSocket
