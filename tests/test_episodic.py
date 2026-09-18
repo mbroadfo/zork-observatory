@@ -110,6 +110,24 @@ class TestFiling:
         assert "+1 other replies" in line   # four shown here, five kinds seen
         assert line.index("What a concept") < line.index("serious")
 
+    def test_a_reprinted_heading_does_not_read_as_arriving(self):
+        """qwen3:8b, live: nine `look`s in a row at West of House. The record
+        rendered each as "→ heading West of House", which reads exactly like a
+        move that got somewhere."""
+        mem = filed(("look", INTRO), ("look", INTRO))
+        line = next(ln for ln in mem.render().splitlines() if "> look" in ln)
+        assert "heading West of House again (the one you were already under)" in line
+        # A move that does arrive somewhere still reads plainly.
+        moved = filed(("north", PATH))
+        assert "> north → heading Forest Path" in moved.render()
+        assert "again" not in moved.render()
+
+    def test_arriving_and_re_describing_are_counted_apart(self):
+        mem = filed(("north", CLEARING), ("s", PATH), ("n", CLEARING), ("look", CLEARING))
+        entries = mem.headings["Clearing"].entries
+        assert list(entries["look"].outcomes)[0].endswith("(the one you were already under)")
+        assert list(entries["s"].outcomes) == ["heading Forest Path"]
+
     def test_the_current_heading_says_how_long_ago(self):
         mem = filed(("north", CLEARING), ("take grating", "No."), ("look", CLEARING), ("wait", "Time passes."))
         text = mem.render()

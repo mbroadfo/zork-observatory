@@ -50,6 +50,12 @@
       <option value="parser" selected>parser — interface explained</option>
       <option value="coached">coached — hints (control arm)</option>
     </select>
+    <select id="numctx" title="Local model context window. Smaller keeps a larger model entirely on the GPU; Ollama drops overflow from the front without saying so." style="display:none">
+      <option value="16384" selected>context: 16k</option>
+      <option value="8192">context: 8k</option>
+      <option value="4096">context: 4k</option>
+      <option value="32768">context: 32k</option>
+    </select>
     <select id="recall" title="What the model is shown of the past each turn" style="display:none">
       <option value="transcript" selected title="The last 30 exchanges, verbatim">recall: transcript</option>
       <option value="episodic" title="Every command filed under the heading it was typed at, with its reply and a count; plus the last exchange">recall: episodic record</option>

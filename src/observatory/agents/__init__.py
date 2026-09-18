@@ -1,6 +1,10 @@
 from . import prompts
 from .base import Agent, AgentAction, TurnContext
 from .llm import RECALL_MODES, default_history
+
+# Kept here so the CLI and server can name the default without importing the
+# Ollama agent (which they only import when one is actually built).
+DEFAULT_NUM_CTX = 16384
 from .simple import MOCK_WALKTHROUGH, HumanAgent, RandomAgent, ScriptedAgent
 
 __all__ = [
@@ -16,6 +20,7 @@ __all__ = [
     "parse_think",
     "default_history",
     "AGENTS",
+    "DEFAULT_NUM_CTX",
     "RECALL_MODES",
 ]
 
@@ -68,5 +73,6 @@ def build_agent(kind: str, **kwargs) -> Agent:
             think=kwargs.get("think"),
             seed=kwargs.get("seed"),
             recall=recall,
+            num_ctx=kwargs.get("num_ctx") or DEFAULT_NUM_CTX,
         )
     raise ValueError(f"Unknown agent: {kind!r} (expected {', '.join(AGENTS)})")

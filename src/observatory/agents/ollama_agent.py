@@ -170,6 +170,20 @@ class OllamaAgent(Agent):
 
     # --- server ----------------------------------------------------------
 
+    def context_warning(self, prompt_chars: int) -> str:
+        """Near the window, or past it. Ollama drops the overflow from the
+        front without a word, and the front is the system prompt and the
+        memory — so a run that quietly stopped being the run you configured
+        should say so rather than just scoring badly."""
+        # ~4 characters a token is rough, and rough is enough: the point is to
+        # notice a prompt approaching the window, not to count it exactly.
+        estimate = prompt_chars // 4
+        if estimate > self.num_ctx:
+            return f"prompt is about {estimate} tokens, past num_ctx={self.num_ctx}: the oldest part was dropped"
+        if estimate > self.num_ctx * 0.85:
+            return f"prompt is about {estimate} tokens, close to num_ctx={self.num_ctx}"
+        return ""
+
     async def preflight(self) -> str | None:
         """Why this run cannot start, or None. Asked once, before turn one, so
         a missing server is an error message and not four hundred turns of an
@@ -267,6 +281,7 @@ class OllamaAgent(Agent):
             self.episodes.before_move(ctx)
             record = self.episodes.render()
         prompt = llm.turn_prompt(self.memory, ctx, self.history_turns, record)
+        crowded = self.context_warning(len(prompt) + len(self.system))
         started = time.perf_counter()
         try:
             data = await self._chat(prompt, llm.MOVE_FIELDS, self.max_tokens)
@@ -280,6 +295,8 @@ class OllamaAgent(Agent):
         overran = data.get("done_reason") == "length" and not command
 
         meta: dict[str, Any] = {"model": self.model, "cost_usd": 0.0}
+        if crowded:
+            meta["context_warning"] = crowded
         if self.episodes is not None:
             # The record exactly as the model saw it this turn: when a player
             # repeats itself, whether the repeat was on the page is the question.

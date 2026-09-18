@@ -512,6 +512,9 @@ function addThought(text, meta) {
     if (meta.overran) bits.push(`⚠ thinking ran past ${meta.overrun_tokens} tokens — this move made without thinking`);
     if (meta.load_ms) bits.push(`loaded in ${(meta.load_ms / 1000).toFixed(1)} s`);
     if (meta.unstructured) bits.push("free-form reply");
+    // Ollama truncates an over-long prompt from the front, silently, and the
+    // front is the system prompt and the memory.
+    if (meta.context_warning) bits.push(`⚠ ${meta.context_warning}`);
     if (meta.cache_read_tokens) bits.push(`${meta.cache_read_tokens} cached`);
     m.textContent = bits.join("  ·  ");
     // The hidden deliberation, on hover; it is in the trace either way.
@@ -1214,6 +1217,7 @@ function syncAgentControls() {
   $("effort").style.display = claude ? "" : "none";
   $("omodel").style.display = local ? "" : "none";
   $("think").style.display = local ? "" : "none";
+  $("numctx").style.display = local ? "" : "none";
   $("info").style.display = claude || local ? "" : "none";
   $("recall").style.display = claude || local ? "" : "none";
   $("notebook").style.display = claude || local ? "" : "none";
@@ -1267,6 +1271,7 @@ $("new-run").onclick = async () => {
   const llm = ["claude", "ollama"].includes($("agent").value);
   const body = {
     recall: llm ? $("recall").value : "transcript",
+    num_ctx: parseInt($("numctx").value, 10) || 16384,
     runs: parseInt($("runs").value, 10) || 1,
     notebook: llm ? $("notebook").value : "off",
     engine: $("engine").value,

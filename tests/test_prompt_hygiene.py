@@ -99,6 +99,26 @@ class TestTheLadderIsActuallyALadder:
     def test_coached_is_a_superset_of_parser(self):
         assert prompts.get("parser") in prompts.get("coached")
 
+    def test_coached_says_the_map_is_fixed_and_refusals_stick(self):
+        """The failure the coached arm exists to rule out: an agent that types
+        the same refused direction eleven times in the same room."""
+        text = prompts.get("coached").lower()
+        for idea in ["the map is fixed", "refused again", "back and forth", "third identical"]:
+            assert idea in text
+
+    def test_coached_names_goals_beyond_movement(self):
+        text = prompts.get("coached").lower()
+        assert "movement is not the point" in text
+        for idea in ["examine", "search", "take", "open", "inventory"]:
+            assert idea in text
+
+    def test_only_coached_carries_any_of_this(self):
+        """Every claim above is coaching, so none of it may appear elsewhere."""
+        for level in CLEAN:
+            text = prompts.get(level).lower()
+            for idea in ["refused again", "movement is not the point", "search", "deposit"]:
+                assert idea not in text, f"{level!r} leaks coaching: {idea!r}"
+
     def test_unknown_level_is_refused_clearly(self):
         with pytest.raises(ValueError, match="Unknown info level"):
             prompts.get("hardmode")
@@ -121,6 +141,12 @@ class TestPromptsTravelWithTheRun:
         assert described["info_level"] == "cold"
         assert described["system_prompt"] == prompts.get("cold")
         assert described["system_fingerprint"] == prompts.fingerprint("cold")
+
+    def test_effort_is_only_sent_to_models_that_take_it(self):
+        from observatory.agents.claude_agent import MOVE_SCHEMA, output_config
+
+        assert output_config("claude-haiku-4-5", "medium", MOVE_SCHEMA) == {"format": MOVE_SCHEMA}
+        assert output_config("claude-opus-5", "medium") == {"effort": "medium"}
 
     def test_fingerprints_differ_between_levels(self):
         seen = {prompts.fingerprint(level) for level in prompts.LEVEL_ORDER}

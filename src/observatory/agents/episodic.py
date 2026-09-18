@@ -117,8 +117,19 @@ class Entry:
         return len(self.outcomes) > 1
 
     @staticmethod
-    def outcome_key(led_to: str, reply: str) -> str:
-        return f"heading {led_to}" if led_to else reply
+    def outcome_key(led_to: str, reply: str, was_under: str = "") -> str:
+        """How one reply reads in the record.
+
+        A heading that is the one already showing is said to be the same one.
+        Rendering `look` as "→ heading West of House" made re-describing where
+        you stand look exactly like arriving somewhere, and a small model read
+        that as progress and typed `look` nine times.
+        """
+        if not led_to:
+            return reply
+        if led_to == was_under:
+            return f"heading {led_to} again (the one you were already under)"
+        return f"heading {led_to}"
 
 
 @dataclass
@@ -172,7 +183,7 @@ class EpisodicMemory:
             entry = place.entries[key] = Entry(command=key, first=self.step)
         led_to = heading_of(reply)
         flat = "" if led_to else _shorten(reply, MAX_REPLY_CHARS)
-        outcome = Entry.outcome_key(led_to, flat)
+        outcome = Entry.outcome_key(led_to, flat, was_under=self.here)
         entry.outcomes[outcome] = entry.outcomes.get(outcome, 0) + 1
         entry.latest = outcome
         entry.count += 1
@@ -237,7 +248,7 @@ class EpisodicMemory:
         ranked = sorted(e.outcomes.items(), key=lambda kv: (-kv[1], kv[0] != e.latest))
         parts = []
         for outcome, n in ranked[:max_outcomes]:
-            text = outcome if outcome.startswith("heading ") else f"\"{_shorten(outcome, limit)}\""
+            text = outcome if outcome.startswith("heading ") else f'"{_shorten(outcome, limit)}"'
             mark = " (latest)" if e.varied and outcome == e.latest else ""
             parts.append(f"{text}{f' ×{n}' if e.varied else ''}{mark}")
         if len(ranked) > max_outcomes:

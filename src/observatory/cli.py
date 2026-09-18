@@ -7,7 +7,7 @@ import asyncio
 import sys
 from pathlib import Path
 
-from .agents import AGENTS, RECALL_MODES, build_agent, default_history, parse_think
+from .agents import AGENTS, DEFAULT_NUM_CTX, RECALL_MODES, build_agent, default_history, parse_think
 from .engine import build_engine, engine_seed
 from .events import Event, EventBus
 from .notebook import MODES as NOTEBOOK_MODES, Notebook
@@ -45,6 +45,9 @@ def _add_run_args(p: argparse.ArgumentParser) -> None:
                    help="LLM agents: transcript (a rolling window of raw exchanges) or episodic "
                         "(every command filed under the heading it was typed at, with its reply "
                         "and a count — see agents/episodic.py)")
+    p.add_argument("--num-ctx", type=int, default=DEFAULT_NUM_CTX,
+                   help="ollama only: context window in tokens. Smaller keeps a larger model "
+                        "entirely on the GPU; overflow is dropped from the front, silently")
     p.add_argument("--history-turns", type=int, default=None,
                    help="raw exchanges shown each turn (default: 30 for transcript, 1 for episodic)")
     p.add_argument("--trace", default=None, help="write a JSONL trace here")
@@ -83,7 +86,7 @@ async def _play_once(args: argparse.Namespace, notebook_mode: str, series: dict[
         agent = build_agent(
             args.agent, commands=script, seed=args.seed, model=args.model, effort=args.effort,
             history_turns=args.history_turns, info_level=args.info_level,
-            think=parse_think(args.think), recall=args.recall,
+            think=parse_think(args.think), recall=args.recall, num_ctx=args.num_ctx,
         )
     except ValueError as exc:
         print(exc, file=sys.stderr)
@@ -109,6 +112,8 @@ async def _play_once(args: argparse.Namespace, notebook_mode: str, series: dict[
             print()
         elif event.type == "agent.thought":
             print(f"  \033[2m{p['text']}\033[0m")
+            if (p.get("meta") or {}).get("context_warning"):
+                print(f"  \033[31m⚠ {p['meta']['context_warning']}\033[0m")
         elif event.type == "command.issued":
             print(f"\033[1m> {p['command']}\033[0m")
         elif event.type == "observation":

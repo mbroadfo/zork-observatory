@@ -47,6 +47,24 @@ PRICING: dict[str, tuple[float, float]] = {
 }
 
 
+# Models that take `output_config.effort`. Haiku 4.5 does not; sending it
+# there would fail every call, and a failed call plays `look`.
+NO_EFFORT_PREFIXES = ("claude-haiku-",)
+
+
+def takes_effort(model: str) -> bool:
+    return not model.startswith(NO_EFFORT_PREFIXES)
+
+
+def output_config(model: str, effort: str, fmt: dict[str, Any] | None = None) -> dict[str, Any]:
+    config: dict[str, Any] = {}
+    if takes_effort(model):
+        config["effort"] = effort
+    if fmt is not None:
+        config["format"] = fmt
+    return config
+
+
 def estimate_cost(model: str, usage: Any) -> float:
     rate_in, rate_out = PRICING.get(model, (5.00, 25.00))
     inp = getattr(usage, "input_tokens", 0) or 0
@@ -136,7 +154,7 @@ class ClaudeAgent(Agent):
                         "cache_control": {"type": "ephemeral"},
                     }
                 ],
-                output_config={"effort": self.effort, "format": MOVE_SCHEMA},
+                output_config=output_config(self.model, self.effort, MOVE_SCHEMA),
                 messages=self._messages(ctx, record),
             )
         except anthropic.APIStatusError as exc:
@@ -201,7 +219,7 @@ class ClaudeAgent(Agent):
                 model=self.model,
                 max_tokens=400,
                 system=[{"type": "text", "text": self.system, "cache_control": {"type": "ephemeral"}}],
-                output_config={"effort": self.effort},
+                output_config=output_config(self.model, self.effort),
                 messages=[{"role": "user", "content": llm.reflection_prompt(self.memory, ctx)}],
             )
         except (anthropic.APIStatusError, anthropic.APIConnectionError):
@@ -224,7 +242,7 @@ class ClaudeAgent(Agent):
             "name": self.name,
             "kind": self.kind,
             "model": self.model,
-            "effort": self.effort,
+            "effort": self.effort if takes_effort(self.model) else None,
             "history_turns": self.history_turns,
             "recall": getattr(self, "recall", "transcript"),
             "max_tokens": self.max_tokens,

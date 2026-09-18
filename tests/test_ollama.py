@@ -274,6 +274,21 @@ class TestConfiguration:
         with pytest.raises(ValueError, match="model"):
             build_agent("ollama", model=None)
 
+    def test_the_context_window_is_a_setting(self):
+        a = build_agent("ollama", model="qwen3:14b", num_ctx=8192)
+        assert a.describe()["options"]["num_ctx"] == 8192
+        assert build_agent("ollama", model="qwen3:8b").describe()["options"]["num_ctx"] == 16384
+
+    async def test_a_prompt_near_the_window_is_flagged(self):
+        """Overflow is dropped from the front — the system prompt and the
+        memory — without a word from the server."""
+        fake = FakeOllama(["north", "south"])
+        a = agent(fake, num_ctx=1024)
+        assert (await a.act(ctx())).meta.get("context_warning") is None
+        big = ctx(transcript=[("look", "x " * 3000)])
+        warning = (await a.act(big)).meta["context_warning"]
+        assert "past num_ctx=1024" in warning
+
     def test_the_factory_builds_one(self):
         a = build_agent("ollama", model="qwen3:8b", info_level="game", think=False, seed=3)
         assert isinstance(a, OllamaAgent)

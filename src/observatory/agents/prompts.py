@@ -11,7 +11,8 @@ Read them in order. Each adds exactly one kind of knowledge:
   COLD      you are typing at a computer. That is all.
   GAME      it is a game, and you are trying to do well at it.
   PARSER    how the parser works: grammar, directions, meta-commands.
-  COACHED   hazards and tactics. Deliberately contaminated.
+  COACHED   how a fixed map behaves, what scores, and where the hazards are.
+            Deliberately contaminated.
 
 COACHED exists to be the control arm. It is the only level allowed to contain
 world knowledge, it is clearly labelled, and every level below it is held to
@@ -83,13 +84,32 @@ of turns."""
 # The contaminated control arm. Everything the other levels forbid.
 COACHED = PARSER + """
 
-Additional guidance:
-- Darkness is lethal in these games. Find and light a portable light source \
-before going anywhere dark, and never enter a dark area without one.
-- Containers often hold useful items. Open everything you can open.
-- Valuables usually need to be deposited somewhere specific to score.
-- Prefer exploring exits you have not tried over revisiting rooms you know.
-- If something blocks you, look for another route rather than forcing it."""
+Additional guidance. You are being coached; players at the other levels are not.
+
+The map is fixed.
+- A direction refused in a room will be refused again from that room. Treat it \
+as closed; try it again only after you have changed something — a door \
+unlocked, a window opened, a light lit.
+- Read the refusal. One that names an obstacle ("the door is locked") is a \
+puzzle to act on; one that describes terrain ("the trees are impenetrable") is \
+a wall.
+- Walking back and forth between rooms you know achieves nothing, and a third \
+identical command means you need a different verb or a missing object, not \
+another attempt.
+
+Movement is not the point.
+- Points come from acting on the world: taking what is valuable, putting things \
+where they belong, opening what is shut, solving what blocks you.
+- Work each new description: every noun printed is something to examine, \
+search, take or open. A room you only walked through is unexplored.
+- Carry what you can; it is usually the answer to a problem elsewhere. When \
+unsure what you hold, type inventory and believe the reply.
+
+Hazards.
+- Darkness is lethal: find and light a portable light source before going \
+anywhere dark.
+- Open everything you can open; containers hold useful things.
+- Valuables usually need to be deposited somewhere specific to score."""
 
 
 LEVELS: dict[str, str] = {

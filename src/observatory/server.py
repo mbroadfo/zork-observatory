@@ -19,7 +19,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .agents import build_agent, default_history, parse_think
+from .agents import DEFAULT_NUM_CTX, build_agent, default_history, parse_think
 from .notebook import MODES as NOTEBOOK_MODES, Notebook
 from .agents.simple import HumanAgent
 from .engine import build_engine, engine_seed
@@ -158,6 +158,7 @@ class NewSession(BaseModel):
     delay: float = 0.35
     seed: int = 12345
     recall: str = "transcript"   # transcript | episodic — see agents/episodic.py
+    num_ctx: int = DEFAULT_NUM_CTX   # ollama: smaller keeps a big model on the GPU
     history_turns: int | None = None   # None: the recall mode's default
     valid_actions: bool = False
     record: bool = True
@@ -288,6 +289,7 @@ async def launch(req: NewSession, series: dict[str, int] | None = None) -> Sessi
             info_level=req.info_level,
             think=parse_think(req.think),
             recall=req.recall,
+            num_ctx=req.num_ctx,
         )
     except Exception as exc:
         engine.close()
