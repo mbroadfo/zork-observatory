@@ -194,6 +194,24 @@ class EpisodicMemory:
         self._see(reply)
         return entry
 
+    def repeat_of(self, command: str) -> Entry | None:
+        """This command, if it has been typed here before and never once done
+        anything but reprint the same reply.
+
+        Deliberately strict. An entry whose replies differ, or that ever showed
+        a new heading, is not a repeat: the world may have changed, and saying
+        otherwise would be the harness deciding what is worth trying.
+        """
+        key = " ".join(command.strip().lower().split())
+        place = self.headings.get(self.here)
+        entry = place.entries.get(key) if place else None
+        if entry is None or not entry.count or len(entry.outcomes) != 1:
+            return None
+        outcome = next(iter(entry.outcomes))
+        if outcome.startswith("heading ") and "again (" not in outcome:
+            return None    # it took you somewhere
+        return entry
+
     def relocate(self, texts: list[str]) -> None:
         """The world moved under the player (a rollback, a restore): take the
         heading from the most recent text that shows one, and file nothing."""

@@ -45,6 +45,10 @@ def _add_run_args(p: argparse.ArgumentParser) -> None:
                    help="LLM agents: transcript (a rolling window of raw exchanges) or episodic "
                         "(every command filed under the heading it was typed at, with its reply "
                         "and a count — see agents/episodic.py)")
+    p.add_argument("--nudge", action="store_true",
+                   help="ollama only: when the model picks a command its own record shows doing "
+                        "nothing here, quote the record back and ask once for another. A scaffold, "
+                        "recorded as one — the agent's name gains +nudge")
     p.add_argument("--num-ctx", type=int, default=DEFAULT_NUM_CTX,
                    help="ollama only: context window in tokens. Smaller keeps a larger model "
                         "entirely on the GPU; overflow is dropped from the front, silently")
@@ -87,6 +91,7 @@ async def _play_once(args: argparse.Namespace, notebook_mode: str, series: dict[
             args.agent, commands=script, seed=args.seed, model=args.model, effort=args.effort,
             history_turns=args.history_turns, info_level=args.info_level,
             think=parse_think(args.think), recall=args.recall, num_ctx=args.num_ctx,
+            nudge=args.nudge,
         )
     except ValueError as exc:
         print(exc, file=sys.stderr)

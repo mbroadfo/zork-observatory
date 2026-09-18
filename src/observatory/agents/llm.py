@@ -107,6 +107,27 @@ def reflection_prompt(mem: AgentMemory, ctx: TurnContext) -> str:
     return "\n".join(lines)
 
 
+def repeat_nudge(command: str, count: int, outcome: str) -> str:
+    """Handed back to a model that just chose a command its own record shows
+    doing nothing here, so it may choose again.
+
+    A scaffold, and labelled as one. It says nothing about the game: it quotes
+    the agent's own record back at it and asks for something else. Whether the
+    model then does something else is the measurement — see the `nudge` option
+    in ollama_agent.py, and the name suffix that keeps a nudged run from being
+    mistaken for a bare one.
+    """
+    seen = outcome if outcome.startswith("heading ") else outcome.strip('"')
+    if count == 1:
+        history = f"You have already typed {command!r} here, and the reply was: {seen}"
+    else:
+        history = (
+            f"You have already typed {command!r} here {count} times, and every time "
+            f"the reply was the same: {seen}"
+        )
+    return f"Wait. {history}\n\nType something you have not tried here."
+
+
 def clean_command(text: str) -> str:
     """The first line, without the prompt character or quotes a model may wrap
     it in. Case and wording are left alone — those are the model's choice."""

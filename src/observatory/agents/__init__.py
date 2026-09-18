@@ -74,5 +74,6 @@ def build_agent(kind: str, **kwargs) -> Agent:
             seed=kwargs.get("seed"),
             recall=recall,
             num_ctx=kwargs.get("num_ctx") or DEFAULT_NUM_CTX,
+            nudge=bool(kwargs.get("nudge")),
         )
     raise ValueError(f"Unknown agent: {kind!r} (expected {', '.join(AGENTS)})")

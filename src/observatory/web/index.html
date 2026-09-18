@@ -50,6 +50,10 @@
       <option value="parser" selected>parser — interface explained</option>
       <option value="coached">coached — hints (control arm)</option>
     </select>
+    <select id="nudge" title="When the model picks a command its own record shows doing nothing here, quote the record back and ask once for another. A scaffold, recorded as one." style="display:none">
+      <option value="0" selected>repeats: allowed</option>
+      <option value="1">repeats: nudge once</option>
+    </select>
     <select id="numctx" title="Local model context window. Smaller keeps a larger model entirely on the GPU; Ollama drops overflow from the front without saying so." style="display:none">
       <option value="16384" selected>context: 16k</option>
       <option value="8192">context: 8k</option>

@@ -276,4 +276,88 @@ class TestTheEpisodicPlayer:
             build_agent("ollama", model="qwen3:8b", recall="photographic")
 
 
+class TestTheNudge:
+    """One re-ask when the model picks a command its own record shows doing
+    nothing here. qwen3:14b typed `use leaflet on grating` nine times against a
+    record that said `I don't know the word "use"` every time; coaching it not
+    to had no effect, so the scaffold does it mechanically."""
+
+    def played(self, *exchanges):
+        mem = filed(*exchanges)
+        return mem
+
+    def test_it_fires_on_a_command_that_has_only_ever_done_nothing(self):
+        mem = self.played(("north", CLEARING), ("use grating", 'I don\'t know the word "use".'))
+        entry = mem.repeat_of("use  GRATING")   # case and spacing do not matter
+        assert entry is not None and entry.count == 1
+        assert mem.repeat_of("open grating") is None       # never tried here
+
+    def test_it_does_not_fire_on_a_command_that_got_somewhere(self):
+        mem = self.played(("north", CLEARING), ("s", PATH), ("n", CLEARING))
+        assert mem.repeat_of("s") is None
+
+    def test_it_does_not_fire_when_the_replies_have_differed(self):
+        """A changed reply means the world may have changed; that is the
+        player's to judge, not the harness's."""
+        mem = self.played(("open box", "It is locked."), ("open box", "Opened."))
+        assert mem.repeat_of("open box") is None
+
+    def test_a_re_described_heading_counts_as_doing_nothing(self):
+        mem = self.played(("look", INTRO))
+        assert mem.repeat_of("look") is not None
+
+    async def test_the_model_is_asked_again_with_its_own_record_quoted(self):
+        fake = FakeOllama(["use grating", "use grating", "open grating"])
+        a = agent(fake, recall="episodic", nudge=True)
+        c1 = TurnContext(turn=1, observation=CLEARING, score=0, moves=0)
+        await a.act(c1)   # first `use grating` — nothing to repeat yet
+        c2 = TurnContext(turn=2, observation='I don\'t know the word "use".', score=0, moves=1)
+        action = await a.act(c2)
+
+        assert action.command == "open grating"
+        assert action.meta["nudged_from"] == "use grating"
+        assert "use grating" in action.meta["nudged"] and "not tried" in action.meta["nudged"]
+        assert 'I don\'t know the word "use".' in action.meta["nudged"]
+        assert "nudge_ignored" not in action.meta
+        # Both calls are paid for.
+        assert action.meta["output_tokens"] == 50
+        assert len(fake.sent) == 3
+
+    async def test_a_model_that_repeats_anyway_has_its_turn_stand_and_flagged(self):
+        fake = FakeOllama(["use grating", "use grating", "use grating"])
+        a = agent(fake, recall="episodic", nudge=True)
+        await a.act(TurnContext(turn=1, observation=CLEARING, score=0, moves=0))
+        action = await a.act(TurnContext(turn=2, observation='I don\'t know the word "use".',
+                                         score=0, moves=1))
+        assert action.command == "use grating"
+        assert action.meta["nudge_ignored"] is True
+
+    async def test_without_the_scaffold_nothing_is_re_asked(self):
+        fake = FakeOllama(["use grating", "use grating"])
+        a = agent(fake, recall="episodic")
+        await a.act(TurnContext(turn=1, observation=CLEARING, score=0, moves=0))
+        action = await a.act(TurnContext(turn=2, observation='I don\'t know the word "use".',
+                                         score=0, moves=1))
+        assert action.command == "use grating"
+        assert "nudged" not in action.meta
+        assert len(fake.sent) == 2
+
+    async def test_it_works_without_showing_the_record(self):
+        """A nudged transcript player keeps the record for this and is not
+        shown it, so the two scaffolds can be varied independently."""
+        fake = FakeOllama(["look", "look", "north"])
+        a = agent(fake, nudge=True, history_turns=0)
+        await a.act(TurnContext(turn=1, observation=INTRO, score=0, moves=0))
+        action = await a.act(TurnContext(turn=2, observation=INTRO, score=0, moves=1))
+        assert "Your record so far" not in fake.sent[0]["messages"][1]["content"]
+        assert action.command == "north"
+        assert action.meta["nudged_from"] == "look"
+
+    def test_a_nudged_player_is_named_as_one(self):
+        a = build_agent("ollama", model="qwen3:14b", recall="episodic", nudge=True)
+        assert a.name == "ollama:qwen3:14b+episodic+nudge"
+        assert a.describe()["nudge"] is True
+        assert build_agent("ollama", model="qwen3:14b").describe()["nudge"] is False
+
+
 _ = reply  # re-exported helper, kept importable for other test modules

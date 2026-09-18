@@ -133,6 +133,7 @@ class OllamaAgent(Agent):
         max_tokens: int | None = DEFAULT_MAX_TOKENS,
         transport: Transport | None = None,
         recall: str = "transcript",
+        nudge: bool = False,
     ) -> None:
         if not model:
             raise ValueError("an Ollama model name is required, e.g. qwen3:8b")
@@ -141,7 +142,11 @@ class OllamaAgent(Agent):
         self.host = resolve_host(host)
         self.history_turns = history_turns
         self.recall = recall
-        self.episodes = EpisodicMemory() if recall == "episodic" else None
+        # One re-ask when the model picks a command its own record shows doing
+        # nothing here. The record is kept either way when nudging is on; with
+        # `transcript` recall it is used for this and never shown.
+        self.nudge = nudge
+        self.episodes = EpisodicMemory() if recall == "episodic" or nudge else None
         self.info_level = info_level
         self.system = prompts.get(info_level)
         # None leaves the model's own default; False/True or low/medium/high
@@ -159,6 +164,7 @@ class OllamaAgent(Agent):
         # Part of the name because it is part of the player: a notebook kept by
         # one memory architecture is not the other's to inherit.
         suffix += "" if recall == "transcript" else f"+{recall}"
+        suffix += "+nudge" if nudge else ""
         self.name = f"ollama:{model}{suffix}"
         self._totals: dict[str, Any] = {
             "input_tokens": 0,
@@ -271,16 +277,42 @@ class OllamaAgent(Agent):
 
     async def act(self, ctx: TurnContext) -> AgentAction:
         action = await self._act(ctx)
+        if self.nudge and self.episodes is not None and not action.meta.get("error"):
+            action = await self._nudged(action, ctx)
         if self.episodes is not None:
             self.episodes.after_move(action.command)
         return action
 
-    async def _act(self, ctx: TurnContext) -> AgentAction:
+    async def _nudged(self, action: AgentAction, ctx: TurnContext) -> AgentAction:
+        """Ask once more when the chosen command has already done nothing here.
+
+        Only once. A model that repeats itself through the nudge has made its
+        choice, and the turn stands as its own — flagged, so the run can be
+        read as what it is.
+        """
+        assert self.episodes is not None
+        entry = self.episodes.repeat_of(action.command)
+        if entry is None:
+            return action
+        note = llm.repeat_nudge(entry.command, entry.count, next(iter(entry.outcomes)))
+        again = await self._act(ctx, extra=note)
+        again.meta["nudged"] = note
+        again.meta["nudged_from"] = action.command
+        for key in ("input_tokens", "output_tokens"):
+            again.meta[key] = action.meta.get(key, 0) + again.meta.get(key, 0)
+        if self.episodes.repeat_of(again.command) is not None:
+            again.meta["nudge_ignored"] = True
+        return again
+
+    async def _act(self, ctx: TurnContext, extra: str = "") -> AgentAction:
         record = ""
         if self.episodes is not None:
-            self.episodes.before_move(ctx)
-            record = self.episodes.render()
+            if not extra:
+                self.episodes.before_move(ctx)
+            record = self.episodes.render() if self.recall == "episodic" else ""
         prompt = llm.turn_prompt(self.memory, ctx, self.history_turns, record)
+        if extra:
+            prompt += "\n\n" + extra
         crowded = self.context_warning(len(prompt) + len(self.system))
         started = time.perf_counter()
         try:
@@ -372,6 +404,7 @@ class OllamaAgent(Agent):
             "options": self._options(self.max_tokens),
             "history_turns": self.history_turns,
             "recall": self.recall,
+            "nudge": self.nudge,
             "info_level": self.info_level,
             "system_prompt": self.system,
             "system_fingerprint": prompts.fingerprint(self.info_level),

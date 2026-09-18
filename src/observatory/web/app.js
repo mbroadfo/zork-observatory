@@ -515,6 +515,9 @@ function addThought(text, meta) {
     // Ollama truncates an over-long prompt from the front, silently, and the
     // front is the system prompt and the memory.
     if (meta.context_warning) bits.push(`⚠ ${meta.context_warning}`);
+    // A nudged turn is not a bare model's turn; say so where the move is read.
+    if (meta.nudged) bits.push(`↩ nudged off "${meta.nudged_from}"`);
+    if (meta.nudge_ignored) bits.push("↩ nudge ignored — repeated anyway");
     if (meta.cache_read_tokens) bits.push(`${meta.cache_read_tokens} cached`);
     m.textContent = bits.join("  ·  ");
     // The hidden deliberation, on hover; it is in the trace either way.
@@ -1218,6 +1221,7 @@ function syncAgentControls() {
   $("omodel").style.display = local ? "" : "none";
   $("think").style.display = local ? "" : "none";
   $("numctx").style.display = local ? "" : "none";
+  $("nudge").style.display = local ? "" : "none";
   $("info").style.display = claude || local ? "" : "none";
   $("recall").style.display = claude || local ? "" : "none";
   $("notebook").style.display = claude || local ? "" : "none";
@@ -1272,6 +1276,7 @@ $("new-run").onclick = async () => {
   const body = {
     recall: llm ? $("recall").value : "transcript",
     num_ctx: parseInt($("numctx").value, 10) || 16384,
+    nudge: $("nudge").value === "1",
     runs: parseInt($("runs").value, 10) || 1,
     notebook: llm ? $("notebook").value : "off",
     engine: $("engine").value,
