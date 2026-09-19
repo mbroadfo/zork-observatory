@@ -149,6 +149,22 @@ def repeat_nudge(command: str, count: int, outcome: str) -> str:
     return f"Wait. {history}\n\nType something you have not tried here."
 
 
+def exhausted_nudge(offered: list[str], note: str) -> str:
+    """When every ranked candidate is one the record has watched do nothing.
+
+    The turn a filter cannot help with: the model is out of ideas and all three
+    of them are the same idea. It is told so, and told that the record lists
+    what is untouched here — which is where the agenda earns its place.
+    """
+    tried = ", ".join(f"{c!r}" for c in offered)
+    return (
+        f"{note}\n\nAll of your choices this turn ({tried}) are ones you have already "
+        f"typed here to no effect. Leave that idea. Your record lists the directions "
+        f"you have not typed here and the words this place's text used that you have "
+        f"not; take one of those."
+    )
+
+
 def clean_command(text: str) -> str:
     """The first line, without the prompt character or quotes a model may wrap
     it in. Case and wording are left alone — those are the model's choice."""

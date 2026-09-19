@@ -109,8 +109,9 @@ search, take or open. A room you only walked through is unexplored.
 unsure what you hold, type inventory and believe the reply.
 
 Hazards.
-- Darkness is lethal: find and light a portable light source before going \
-anywhere dark.
+- Darkness is lethal: carry a light source and make it work before going \
+anywhere dark. Not every one is lit with a flame — some are switched on — so \
+if lighting it fails, try turning it on.
 - Open everything you can open; containers hold useful things.
 - Valuables usually need to be deposited somewhere specific to score."""
 

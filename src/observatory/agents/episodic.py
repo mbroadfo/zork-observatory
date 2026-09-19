@@ -177,6 +177,11 @@ class EpisodicMemory:
         # The latest reply to an inventory command the player typed, whole,
         # and the step it came back at. Only ever the game's words.
         self.inventory: tuple[str, int] | None = None
+        # First words the parser has and has not taken, anywhere. A model that
+        # spends thirty turns on `use` and `try` while its own record shows
+        # `open` and `pour` working is missing something it already knows.
+        self.verbs_taken: list[str] = []
+        self.verbs_refused: list[str] = []
         # What was last typed and when, so the next observation can be
         # matched to it — or recognised as not a reply to it at all.
         self._pending: str | None = None
@@ -222,6 +227,7 @@ class EpisodicMemory:
         entry.led_to, entry.reply = led_to, flat
         if key in INVENTORY_WORDS:
             self.inventory = (" ".join(reply.split())[:MAX_INVENTORY_CHARS], self.step)
+        self._note_verb(key, reply)
         self._see(reply)
         return entry
 
@@ -242,6 +248,22 @@ class EpisodicMemory:
         if outcome.startswith("heading ") and "again (" not in outcome:
             return None    # it took you somewhere
         return entry
+
+    def _note_verb(self, key: str, reply: str) -> None:
+        """Whether the parser knew the first word, by its own words.
+
+        Only the one reply that names a word it does not know counts as a
+        refusal. Everything else — refused for any other reason, or not — is a
+        word it took, which is what the player needs to know.
+        """
+        verb = key.split()[0] if key.split() else ""
+        if not verb or verb in self.verbs_taken or verb in self.verbs_refused:
+            return
+        unknown = re.search(r'know the word ["“]?([a-z\'-]+)', reply.lower())
+        if unknown and unknown.group(1) == verb:
+            self.verbs_refused.append(verb)
+        elif not unknown:
+            self.verbs_taken.append(verb)
 
     def relocate(self, texts: list[str]) -> None:
         """The world moved under the player (a rollback, a restore): take the
@@ -315,6 +337,14 @@ class EpisodicMemory:
             "how many of those times it came back.",
             "",
         ]
+        if self.verbs_taken:
+            lines.append("First words the parser has taken from you: " + ", ".join(self.verbs_taken))
+        if self.verbs_refused:
+            lines.append(
+                "First words it said it does not know: " + ", ".join(self.verbs_refused)
+            )
+        if self.verbs_taken or self.verbs_refused:
+            lines.append("")
         if self.inventory:
             text, step = self.inventory
             lines.append(f"Latest reply to your inventory command ({self._ago(step)}): \"{text}\"")
@@ -370,4 +400,6 @@ class EpisodicMemory:
             "entries": len(entries),
             "repeats": sum(e.count - 1 for e in entries),
             "here": self.here,
+            "verbs_taken": len(self.verbs_taken),
+            "verbs_refused": len(self.verbs_refused),
         }

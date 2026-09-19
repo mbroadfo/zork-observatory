@@ -209,6 +209,49 @@ class TestTheAgenda:
         assert "tree" in self.listed(mem, "Words this place")
 
 
+class TestTheVerbsItHasEstablished:
+    """qwen3:14b spent dozens of turns on `use` and `try`, which this parser
+    does not know, while its own record showed `open` and `pour` working."""
+
+    def test_a_word_the_parser_took_is_listed(self):
+        mem = filed(("open mailbox", "Opening the small mailbox reveals a leaflet."),
+                    ("take leaflet", "Taken."))
+        line = next(ln for ln in mem.render().splitlines() if "has taken from you" in ln)
+        assert "open" in line and "take" in line
+
+    def test_a_word_it_does_not_know_is_listed_apart(self):
+        mem = filed(("use leaflet on grating", 'I don\'t know the word "use".'),
+                    ("open mailbox", "Opened."))
+        text = mem.render()
+        assert "does not know: use" in text
+        assert "use" not in next(ln for ln in text.splitlines() if "has taken from you" in ln)
+
+    def test_a_refusal_about_a_noun_does_not_condemn_the_verb(self):
+        """"You can't see any match here" is about the match, not about `look`."""
+        mem = filed(("look for match", "You can't see any match here!"))
+        assert "look" in next(ln for ln in mem.render().splitlines() if "has taken" in ln)
+
+    def test_an_unknown_noun_settles_nothing_about_the_verb(self):
+        """The parser names the word it does not know. When that word is the
+        noun, the sentence says nothing either way about the first word."""
+        mem = filed(("look at doorway", 'I don\'t know the word "doorway".'))
+        assert mem.summary()["verbs_taken"] == 0
+        assert mem.summary()["verbs_refused"] == 0
+        # ...and the same verb is judged on a sentence the parser did take.
+        mem.record("look", "West of House\nAn open field.")
+        assert "look" in next(ln for ln in mem.render().splitlines() if "has taken" in ln)
+
+    def test_each_word_is_judged_once(self):
+        mem = filed(("open mailbox", "Opened."), ("open sack", "Opened."), ("open door", "Locked."))
+        line = next(ln for ln in mem.render().splitlines() if "has taken" in ln)
+        assert line.count("open") == 1
+
+    def test_the_counts_travel_in_the_trace(self):
+        mem = filed(("use it", 'I don\'t know the word "use".'), ("take leaflet", "Taken."))
+        assert mem.summary()["verbs_taken"] == 1
+        assert mem.summary()["verbs_refused"] == 1
+
+
 class TestWhatTheRecordShows:
     def render(self):
         return filed(
@@ -446,16 +489,31 @@ class TestRankedCandidates:
         assert action.meta["skipped"] == ["open grating"]
         assert action.meta["offered"] == ["open grating", "south", "take grating"]
 
-    async def test_when_every_candidate_is_known_inert_the_model_still_chooses(self):
-        """The harness has no better idea than the model does."""
+    async def exhausted(self, *after):
+        """Two turns that make `open grating` and `look` known-inert here, then
+        a third where both are offered again — the turn the filter cannot help
+        with, because the model is out of ideas."""
         fake = FakeOllama([ranked("open grating", "x"), ranked("look", "x"),
-                           ranked("open grating", "look")])
+                           ranked("open grating", "look"), *after])
         a = agent(fake, recall="episodic", candidates=True)
         await a.act(TurnContext(turn=1, observation=CLEARING, score=0, moves=0))
         await a.act(TurnContext(turn=2, observation="It is closed.", score=0, moves=1))
-        action = await a.act(TurnContext(turn=3, observation=CLEARING, score=0, moves=2))
-        assert action.command == "open grating"
+        return await a.act(TurnContext(turn=3, observation=CLEARING, score=0, moves=2)), fake
+
+    async def test_an_exhausted_list_is_asked_again_and_told_so(self):
+        action, fake = await self.exhausted(ranked("south", "north"))
+        assert action.command == "south"
         assert action.meta["all_candidates_inert"] is True
+        asked = fake.sent[-1]["messages"][1]["content"]
+        assert "All of your choices this turn" in asked
+        assert "'open grating'" in asked and "'look'" in asked
+        assert "directions you have not typed here" in asked
+
+    async def test_a_model_out_of_ideas_twice_still_has_its_turn_stand(self):
+        """The harness has no better idea than the model does."""
+        action, _ = await self.exhausted(ranked("open grating", "look"))
+        assert action.command == "open grating"
+        assert action.meta["nudge_ignored"] is True
 
     async def test_one_call_per_turn(self):
         _, fake = await self.play(ranked("open grating", "take grating"),

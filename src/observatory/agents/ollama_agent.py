@@ -295,7 +295,11 @@ class OllamaAgent(Agent):
 
     async def act(self, ctx: TurnContext) -> AgentAction:
         action = await self._act(ctx)
-        if self.nudge and self.episodes is not None and not action.meta.get("error"):
+        # A ranked list that is inert all the way down is the moment the player
+        # is most stuck, and the one moment the filter has nothing left to do.
+        # Ask again there, whether or not the nudge was asked for.
+        wants_nudge = self.nudge or action.meta.get("all_candidates_inert")
+        if wants_nudge and self.episodes is not None and not action.meta.get("error"):
             action = await self._nudged(action, ctx)
         if self.episodes is not None:
             self.episodes.after_move(action.command)
@@ -313,9 +317,15 @@ class OllamaAgent(Agent):
         if entry is None:
             return action
         note = llm.repeat_nudge(entry.command, entry.count, next(iter(entry.outcomes)))
+        if action.meta.get("all_candidates_inert"):
+            note = llm.exhausted_nudge(action.meta.get("offered") or [action.command], note)
         again = await self._act(ctx, extra=note)
         again.meta["nudged"] = note
         again.meta["nudged_from"] = action.command
+        # Why the re-ask happened belongs with the move it produced.
+        for key in ("all_candidates_inert", "offered", "skipped"):
+            if key in action.meta:
+                again.meta.setdefault(key, action.meta[key])
         for key in ("input_tokens", "output_tokens"):
             again.meta[key] = action.meta.get(key, 0) + again.meta.get(key, 0)
         if self.episodes.repeat_of(again.command) is not None:
