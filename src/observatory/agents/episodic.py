@@ -45,7 +45,9 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..world.graph import DIRECTIONS, parse_movement
 from .base import TurnContext
+from .simple import harvest_nouns
 
 NO_HEADING = ""               # before the text has shown any heading
 MAX_REPLY_CHARS = 90          # a reply as filed; enough to recognise it
@@ -57,6 +59,18 @@ MAX_HEADING_CHARS = 40
 MAX_OUTCOMES_HERE = 4         # distinct replies listed per entry
 MAX_OUTCOMES_ELSEWHERE = 2
 MAX_INVENTORY_CHARS = 300
+MAX_AGENDA_NOUNS = 10
+
+# The compass as a player reads it, rather than whatever order the set gives.
+COMPASS_ORDER = [
+    "north", "south", "east", "west", "northeast", "northwest",
+    "southeast", "southwest", "up", "down", "in", "out",
+]
+assert set(COMPASS_ORDER) == set(DIRECTIONS), "the graph knows a direction this list does not"
+
+# A direction word in a room description ("a path leads south") is not a thing
+# to act on, and the directions have their own line in the agenda.
+_NOT_A_THING = set(COMPASS_ORDER) | {"n", "s", "e", "w", "ne", "nw", "se", "sw", "u", "d"}
 
 # Pinned only once the player has typed one of these itself, so the pin never
 # teaches the word. The parser rung's prompt names "inventory"; "i" is the
@@ -138,6 +152,18 @@ class Heading:
     shown: int = 0            # times the text has displayed this heading
     last: int = 0
     entries: dict[str, Entry] = field(default_factory=dict)
+    # Words the text printed under this heading that look like things. Kept in
+    # the order they were read, so the agenda reads like the description does.
+    nouns: list[str] = field(default_factory=list)
+
+    def untried_directions(self) -> list[str]:
+        tried = {parse_movement(cmd) for cmd in self.entries}
+        return [d for d in COMPASS_ORDER if d not in tried]
+
+    def untouched_nouns(self) -> list[str]:
+        """Things named here that no command typed here has mentioned."""
+        spoken = {word for cmd in self.entries for word in cmd.split()}
+        return [n for n in self.nouns if n not in spoken]
 
 
 class EpisodicMemory:
@@ -170,6 +196,11 @@ class EpisodicMemory:
             place = self._at(name)
             place.shown += 1
             place.last = self.step
+            # Only text that carries the heading describes the place, so only
+            # that text is read for things. A refusal names nothing.
+            for noun in harvest_nouns(text):
+                if noun not in place.nouns and noun not in _NOT_A_THING and noun not in name.lower():
+                    place.nouns.append(noun)
             self.here = name
 
     def record(self, command: str, reply: str) -> Entry:
@@ -299,6 +330,18 @@ class EpisodicMemory:
             lines.append("  nothing typed here yet")
         elif len(entries) > MAX_HERE:
             lines.append(f"  (+{len(entries) - MAX_HERE} older)")
+
+        # What is left here, which is the thing a record of what you did does
+        # not tell you. Both lines are subtraction, not advice: directions you
+        # have not typed here, and words this place's own text printed that
+        # none of your commands here have mentioned.
+        if here:
+            untried = here.untried_directions()
+            if untried:
+                lines.append("  Directions not yet typed here: " + ", ".join(untried))
+            untouched = here.untouched_nouns()[:MAX_AGENDA_NOUNS]
+            if untouched:
+                lines.append("  Words this place's text used that you have not: " + ", ".join(untouched))
 
         others = sorted(
             (h for h in self.headings.values() if h.name != self.here and h.entries),

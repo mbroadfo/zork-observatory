@@ -63,8 +63,15 @@ def filed(*exchanges, start=INTRO) -> EpisodicMemory:
     return mem
 
 
-CLEARING = "Clearing\nYou are in a clearing, with a forest surrounding you on all sides."
-PATH = "Forest Path\nThis is a path winding through a dimly lit forest."
+CLEARING = (
+    "Clearing\nYou are in a clearing, with a forest surrounding you on all sides. "
+    "A path leads south.\nOn the ground is a pile of leaves."
+)
+PATH = (
+    "Forest Path\nThis is a path winding through a dimly lit forest. The path heads "
+    "north-south here. One particularly large tree with some low branches stands at "
+    "the edge of the path."
+)
 WALL = "The forest becomes impenetrable to the north."
 
 
@@ -154,6 +161,52 @@ class TestFiling:
 
     def test_nothing_is_rendered_before_anything_is_typed(self):
         assert filed().render() == ""
+
+
+class TestTheAgenda:
+    """What is left here, which a record of what you did does not say.
+
+    qwen3:14b spent 15 of 37 turns on `look` and `inventory`, saying almost
+    every turn that it should try a new direction and then not naming one.
+    Both lines here are subtraction from what the agent itself has seen.
+    """
+
+    def listed(self, mem, heading: str) -> list[str]:
+        line = next(ln for ln in mem.render().splitlines() if heading in ln)
+        return [w.strip() for w in line.split(":", 1)[1].split(",")]
+
+    def test_directions_not_yet_typed_here(self):
+        mem = filed(("north", CLEARING), ("s", PATH), ("n", CLEARING), ("e", "It is dark."))
+        left = self.listed(mem, "Directions not yet")
+        assert "south" not in left and "east" not in left    # both typed here
+        assert "north" in left and "up" in left
+        # Compass order, not whatever order the set iterates in.
+        assert left.index("north") < left.index("up") < left.index("out")
+
+    def test_an_abbreviation_counts_as_the_direction(self):
+        mem = filed(("north", CLEARING), ("n", "The forest becomes impenetrable to the north."))
+        assert "north" not in self.listed(mem, "Directions not yet")
+
+    def test_words_the_place_named_that_no_command_used(self):
+        mem = filed(("north", CLEARING), ("take leaves", "Taken."))
+        left = self.listed(mem, "Words this place")
+        assert "leaves" not in left          # already spoken here
+        assert "path" in left and "forest" in left and "pile" in left
+
+    def test_a_refusal_names_nothing(self):
+        """Only text carrying the heading describes the place."""
+        mem = filed(("north", CLEARING), ("xyzzy", "A hollow voice says fool."))
+        line = next(ln for ln in mem.render().splitlines() if "Words this place" in ln)
+        assert "hollow" not in line and "voice" not in line
+
+    def test_directions_are_not_listed_as_things(self):
+        """"A path leads south" names a direction, not something to act on."""
+        assert "south" not in self.listed(filed(("north", CLEARING)), "Words this place")
+
+    def test_the_agenda_is_for_where_you_stand(self):
+        mem = filed(("north", CLEARING), ("s", PATH))
+        assert mem.render().count("Directions not yet typed here") == 1
+        assert "tree" in self.listed(mem, "Words this place")
 
 
 class TestWhatTheRecordShows:

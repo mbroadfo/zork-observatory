@@ -69,6 +69,25 @@ def _is_noun_shaped(word: str) -> bool:
     return True
 
 
+def harvest_nouns(text: str) -> list[str]:
+    """Candidate object words from whatever the game printed, in reading order.
+
+    No game knowledge: it is shape and a stoplist of English function words,
+    applied to text the player has already seen. Shared with the episodic
+    record (episodic.py), which uses it to list what a description named.
+    """
+    found: list[str] = []
+    word = ""
+    for ch in text.lower() + " ":
+        if ch.isalpha() or ch == "'":
+            word += ch
+            continue
+        if _is_noun_shaped(word) and word not in found:
+            found.append(word)
+        word = ""
+    return found
+
+
 class RandomAgent(Agent):
     """The honest floor: no game knowledge, only what it has been shown.
 
@@ -106,18 +125,10 @@ class RandomAgent(Agent):
         ):
             return
 
-        word = ""
-        for ch in lowered:
-            if ch.isalpha() or ch == "'":
-                word += ch
-                continue
-            if _is_noun_shaped(word) and word not in self._seen:
+        for word in harvest_nouns(lowered):
+            if word not in self._seen:
                 self._seen.add(word)
                 self._nouns.append(word)
-            word = ""
-        if _is_noun_shaped(word) and word not in self._seen:
-            self._seen.add(word)
-            self._nouns.append(word)
 
     async def act(self, ctx: TurnContext) -> AgentAction:
         if ctx.valid_actions:

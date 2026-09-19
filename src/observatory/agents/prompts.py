@@ -96,6 +96,9 @@ a wall.
 - Walking back and forth between rooms you know achieves nothing, and a third \
 identical command means you need a different verb or a missing object, not \
 another attempt.
+- Arriving somewhere prints the description, so looking again straight after a \
+move tells you nothing you were not just told. Spend the turn on a direction or \
+an object instead.
 
 Movement is not the point.
 - Points come from acting on the world: taking what is valuable, putting things \
