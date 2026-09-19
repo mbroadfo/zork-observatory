@@ -39,6 +39,27 @@ MOVE_FIELDS: dict[str, Any] = {
 # and the interpreter would only choke on it.
 MAX_COMMAND_CHARS = 120
 
+# The same move, with fallbacks. Asking for a ranked list costs one call, not
+# two, and turns "don't repeat yourself" from an instruction into a choice the
+# harness can act on: it plays the first candidate its record does not already
+# know to be inert here. The model still decides what is worth trying; the
+# harness only skips what it has watched do nothing.
+MOVE_FIELDS_RANKED: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "reasoning": MOVE_FIELDS["properties"]["reasoning"],
+        "command": MOVE_FIELDS["properties"]["command"],
+        "alternatives": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Two more lines you would type instead, best first, "
+                           "different from the first and from each other.",
+        },
+    },
+    "required": ["reasoning", "command", "alternatives"],
+    "additionalProperties": False,
+}
+
 
 RECALL_MODES = ("transcript", "episodic")
 

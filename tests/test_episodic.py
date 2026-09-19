@@ -413,4 +413,66 @@ class TestTheNudge:
         assert build_agent("ollama", model="qwen3:14b").describe()["nudge"] is False
 
 
+def ranked(command, *alternatives, reasoning="trying something"):
+    import json as _json
+    return {"message": {"content": _json.dumps(
+        {"reasoning": reasoning, "command": command, "alternatives": list(alternatives)})},
+        "prompt_eval_count": 300, "eval_count": 25}
+
+
+class TestRankedCandidates:
+    """The mechanical form of "punish a repeat": the model ranks three, and the
+    harness plays the first its record does not already know to be inert. One
+    call, and the skip is an act rather than a request."""
+
+    async def play(self, *answers, **kw):
+        fake = FakeOllama(list(answers))
+        a = agent(fake, recall="episodic", candidates=True, **kw)
+        await a.act(TurnContext(turn=1, observation=CLEARING, score=0, moves=0))
+        action = await a.act(TurnContext(turn=2, observation="It is closed.", score=0, moves=1))
+        return action, fake
+
+    async def test_the_first_choice_stands_when_it_is_new(self):
+        action, fake = await self.play(ranked("open grating", "take grating"),
+                                       ranked("unlock grating", "take grating"))
+        assert action.command == "unlock grating"
+        assert "skipped" not in action.meta
+        assert fake.sent[0]["format"]["properties"]["alternatives"]["type"] == "array"
+
+    async def test_a_known_inert_first_choice_is_skipped_for_the_next(self):
+        action, _ = await self.play(ranked("open grating", "take grating"),
+                                    ranked("open grating", "south", "take grating"))
+        assert action.command == "south"
+        assert action.meta["skipped"] == ["open grating"]
+        assert action.meta["offered"] == ["open grating", "south", "take grating"]
+
+    async def test_when_every_candidate_is_known_inert_the_model_still_chooses(self):
+        """The harness has no better idea than the model does."""
+        fake = FakeOllama([ranked("open grating", "x"), ranked("look", "x"),
+                           ranked("open grating", "look")])
+        a = agent(fake, recall="episodic", candidates=True)
+        await a.act(TurnContext(turn=1, observation=CLEARING, score=0, moves=0))
+        await a.act(TurnContext(turn=2, observation="It is closed.", score=0, moves=1))
+        action = await a.act(TurnContext(turn=3, observation=CLEARING, score=0, moves=2))
+        assert action.command == "open grating"
+        assert action.meta["all_candidates_inert"] is True
+
+    async def test_one_call_per_turn(self):
+        _, fake = await self.play(ranked("open grating", "take grating"),
+                                  ranked("open grating", "south"))
+        assert len(fake.sent) == 2
+
+    async def test_a_prose_reply_still_yields_a_command(self):
+        fake = FakeOllama([{"message": {"content": "north\n\nheading off"}, "eval_count": 9}])
+        a = agent(fake, recall="episodic", candidates=True)
+        action = await a.act(TurnContext(turn=1, observation=CLEARING, score=0, moves=0))
+        assert action.command == "north"
+        assert action.meta["unstructured"] is True
+
+    def test_a_ranked_player_is_named_as_one(self):
+        a = build_agent("ollama", model="qwen3:14b", recall="episodic", candidates=True)
+        assert a.name == "ollama:qwen3:14b+episodic+candidates"
+        assert a.describe()["candidates"] is True
+
+
 _ = reply  # re-exported helper, kept importable for other test modules

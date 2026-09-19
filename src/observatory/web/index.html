@@ -53,6 +53,7 @@
     <select id="nudge" title="When the model picks a command its own record shows doing nothing here, quote the record back and ask once for another. A scaffold, recorded as one." style="display:none">
       <option value="0" selected>repeats: allowed</option>
       <option value="1">repeats: nudge once</option>
+      <option value="2" title="Ask for three ranked commands and play the first this place's record does not already show doing nothing">repeats: rank three</option>
     </select>
     <select id="numctx" title="Local model context window. Smaller keeps a larger model entirely on the GPU; Ollama drops overflow from the front without saying so." style="display:none">
       <option value="16384" selected>context: 16k</option>

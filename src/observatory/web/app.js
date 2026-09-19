@@ -518,6 +518,8 @@ function addThought(text, meta) {
     // A nudged turn is not a bare model's turn; say so where the move is read.
     if (meta.nudged) bits.push(`↩ nudged off "${meta.nudged_from}"`);
     if (meta.nudge_ignored) bits.push("↩ nudge ignored — repeated anyway");
+    if (meta.skipped && meta.skipped.length) bits.push(`↩ skipped ${meta.skipped.map((c) => `"${c}"`).join(", ")}`);
+    if (meta.all_candidates_inert) bits.push("↩ every candidate already seen to do nothing here");
     if (meta.cache_read_tokens) bits.push(`${meta.cache_read_tokens} cached`);
     m.textContent = bits.join("  ·  ");
     // The hidden deliberation, on hover; it is in the trace either way.
@@ -1277,6 +1279,7 @@ $("new-run").onclick = async () => {
     recall: llm ? $("recall").value : "transcript",
     num_ctx: parseInt($("numctx").value, 10) || 16384,
     nudge: $("nudge").value === "1",
+    candidates: $("nudge").value === "2",
     runs: parseInt($("runs").value, 10) || 1,
     notebook: llm ? $("notebook").value : "off",
     engine: $("engine").value,

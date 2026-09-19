@@ -134,6 +134,7 @@ class OllamaAgent(Agent):
         transport: Transport | None = None,
         recall: str = "transcript",
         nudge: bool = False,
+        candidates: bool = False,
     ) -> None:
         if not model:
             raise ValueError("an Ollama model name is required, e.g. qwen3:8b")
@@ -146,7 +147,11 @@ class OllamaAgent(Agent):
         # nothing here. The record is kept either way when nudging is on; with
         # `transcript` recall it is used for this and never shown.
         self.nudge = nudge
-        self.episodes = EpisodicMemory() if recall == "episodic" or nudge else None
+        # Ask for a ranked list and play the first the record does not already
+        # know to be inert here. Cheaper than the nudge (one call, not two) and
+        # the skip is an act rather than a request.
+        self.candidates = candidates
+        self.episodes = EpisodicMemory() if recall == "episodic" or nudge or candidates else None
         self.info_level = info_level
         self.system = prompts.get(info_level)
         # None leaves the model's own default; False/True or low/medium/high
@@ -165,6 +170,7 @@ class OllamaAgent(Agent):
         # one memory architecture is not the other's to inherit.
         suffix += "" if recall == "transcript" else f"+{recall}"
         suffix += "+nudge" if nudge else ""
+        suffix += "+candidates" if candidates else ""
         self.name = f"ollama:{model}{suffix}"
         self._totals: dict[str, Any] = {
             "input_tokens": 0,
@@ -262,18 +268,30 @@ class OllamaAgent(Agent):
     @staticmethod
     def _parse(message: dict[str, Any]) -> tuple[str, str, bool]:
         """(command, reasoning, structured) from a reply."""
+        command, _, reasoning, structured = OllamaAgent._parse_ranked(message)
+        return command, reasoning, structured
+
+    @staticmethod
+    def _parse_ranked(message: dict[str, Any]) -> tuple[str, list[str], str, bool]:
+        """(command, alternatives, reasoning, structured) from a reply."""
         text = (message.get("content") or "").strip()
         try:
             parsed = json.loads(text)
+            raw = parsed.get("alternatives") or []
+            alternatives = [
+                cleaned for cleaned in (llm.clean_command(str(a)) for a in raw if isinstance(a, str))
+                if cleaned
+            ]
             return (
                 llm.clean_command(str(parsed.get("command", ""))),
+                alternatives,
                 str(parsed.get("reasoning", "")).strip(),
                 True,
             )
         except (json.JSONDecodeError, AttributeError):
             # Small models sometimes answer in prose despite the format. The
             # first line is still what it chose to type, and is kept as such.
-            return llm.clean_command(text), "[reply was not in the requested format]", False
+            return llm.clean_command(text), [], "[reply was not in the requested format]", False
 
     async def act(self, ctx: TurnContext) -> AgentAction:
         action = await self._act(ctx)
@@ -315,14 +333,15 @@ class OllamaAgent(Agent):
             prompt += "\n\n" + extra
         crowded = self.context_warning(len(prompt) + len(self.system))
         started = time.perf_counter()
+        schema = llm.MOVE_FIELDS_RANKED if self.candidates else llm.MOVE_FIELDS
         try:
-            data = await self._chat(prompt, llm.MOVE_FIELDS, self.max_tokens)
+            data = await self._chat(prompt, schema, self.max_tokens)
         except OllamaError as exc:
             return AgentAction(command="look", thought=f"[ollama error: {exc}]", meta={"error": True})
         inp, out = self._count(data, (time.perf_counter() - started) * 1000)
 
         message = data.get("message") or {}
-        command, reasoning, structured = self._parse(message)
+        command, alternatives, reasoning, structured = self._parse_ranked(message)
         thinking = message.get("thinking") or ""
         overran = data.get("done_reason") == "length" and not command
 
@@ -350,7 +369,7 @@ class OllamaAgent(Agent):
             meta["overrun_tokens"] = out
             retry_started = time.perf_counter()
             try:
-                data = await self._chat(prompt, llm.MOVE_FIELDS, self.max_tokens, think=False, override=True)
+                data = await self._chat(prompt, schema, self.max_tokens, think=False, override=True)
             except OllamaError as exc:
                 data = {}
                 reasoning = f"[ran past {out} tokens without answering; retry failed: {exc}]"
@@ -368,10 +387,33 @@ class OllamaAgent(Agent):
         })
         if not structured:
             meta["unstructured"] = True
+
+        if self.candidates and self.episodes is not None and command:
+            command = self._first_untried([command, *alternatives], meta)
         if not command:
             meta["error"] = True
 
         return AgentAction(command=command or "look", thought=reasoning, meta=meta)
+
+    def _first_untried(self, ranked: list[str], meta: dict[str, Any]) -> str:
+        """The model's own ranking, minus what the record has watched do nothing.
+
+        If every candidate is one of those, the first stands: the choice was
+        the model's, and the harness has no better idea than it does.
+        """
+        assert self.episodes is not None
+        skipped = []
+        for candidate in ranked:
+            if self.episodes.repeat_of(candidate) is None:
+                if skipped:
+                    meta["skipped"] = skipped
+                    meta["offered"] = ranked
+                return candidate
+            skipped.append(candidate)
+        meta["skipped"] = skipped[:-1]
+        meta["offered"] = ranked
+        meta["all_candidates_inert"] = True
+        return ranked[0]
 
     async def reflect(self, ctx: TurnContext, cause: str) -> str | None:
         if self.episodes is not None:
@@ -405,6 +447,7 @@ class OllamaAgent(Agent):
             "history_turns": self.history_turns,
             "recall": self.recall,
             "nudge": self.nudge,
+            "candidates": self.candidates,
             "info_level": self.info_level,
             "system_prompt": self.system,
             "system_fingerprint": prompts.fingerprint(self.info_level),

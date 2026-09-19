@@ -45,6 +45,9 @@ def _add_run_args(p: argparse.ArgumentParser) -> None:
                    help="LLM agents: transcript (a rolling window of raw exchanges) or episodic "
                         "(every command filed under the heading it was typed at, with its reply "
                         "and a count — see agents/episodic.py)")
+    p.add_argument("--candidates", action="store_true",
+                   help="ollama only: ask for a ranked list of commands and play the first the "
+                        "record does not already know to be inert here. One call, not two")
     p.add_argument("--nudge", action="store_true",
                    help="ollama only: when the model picks a command its own record shows doing "
                         "nothing here, quote the record back and ask once for another. A scaffold, "
@@ -91,7 +94,7 @@ async def _play_once(args: argparse.Namespace, notebook_mode: str, series: dict[
             args.agent, commands=script, seed=args.seed, model=args.model, effort=args.effort,
             history_turns=args.history_turns, info_level=args.info_level,
             think=parse_think(args.think), recall=args.recall, num_ctx=args.num_ctx,
-            nudge=args.nudge,
+            nudge=args.nudge, candidates=args.candidates,
         )
     except ValueError as exc:
         print(exc, file=sys.stderr)

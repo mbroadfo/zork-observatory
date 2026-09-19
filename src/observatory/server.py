@@ -160,6 +160,7 @@ class NewSession(BaseModel):
     recall: str = "transcript"   # transcript | episodic — see agents/episodic.py
     num_ctx: int = DEFAULT_NUM_CTX   # ollama: smaller keeps a big model on the GPU
     nudge: bool = False          # ollama: re-ask once on a command already seen to do nothing here
+    candidates: bool = False     # ollama: rank three, play the first not already seen to be inert
     history_turns: int | None = None   # None: the recall mode's default
     valid_actions: bool = False
     record: bool = True
@@ -292,6 +293,7 @@ async def launch(req: NewSession, series: dict[str, int] | None = None) -> Sessi
             recall=req.recall,
             num_ctx=req.num_ctx,
             nudge=req.nudge,
+            candidates=req.candidates,
         )
     except Exception as exc:
         engine.close()
