@@ -125,6 +125,10 @@ class Entry:
     # "replies varied" reads as though the result might change.
     outcomes: dict[str, int] = field(default_factory=dict)
     latest: str = ""
+    # Typed while no heading had been printed since some earlier turn — so
+    # which place it belongs to is a guess. The journal, which claims to hold
+    # what is true of a place, leaves these alone.
+    stale: bool = False
 
     @property
     def varied(self) -> bool:
@@ -155,6 +159,9 @@ class Heading:
     # Words the text printed under this heading that look like things. Kept in
     # the order they were read, so the agenda reads like the description does.
     nouns: list[str] = field(default_factory=list)
+    # The place as it first appeared, before anything was touched. The journal
+    # keeps this across runs; the world resets, the description does not.
+    first_text: str = ""
 
     def untried_directions(self) -> list[str]:
         tried = {parse_movement(cmd) for cmd in self.entries}
@@ -179,6 +186,13 @@ class EpisodicMemory:
         # unlit attic — and the model reasoned about the kitchen. Truthful and
         # silently stale, which is worse than either.
         self.heading_shown = 0
+        # Entries typed after a movement command that printed no heading. Until
+        # the game prints one again, which place they belong to is unsettled:
+        # the move may have taken you somewhere unlit, or may have been refused
+        # and left you where you were. The next heading says which.
+        self._unsettled: list[Entry] = []
+        self._unsettled_place = ""
+        self._unsettled_since = 0
         # The latest reply to an inventory command the player typed, whole,
         # and the step it came back at. Only ever the game's words.
         self.inventory: tuple[str, int] | None = None
@@ -210,6 +224,13 @@ class EpisodicMemory:
             place = self._at(name)
             place.shown += 1
             place.last = self.step
+            # From the heading down. Anything above it belongs to the machine,
+            # not the place: the copyright banner was being read as things to
+            # act on at West of House.
+            described = text[text.index(name):].strip()
+            if not place.first_text:
+                place.first_text = described
+            text = described
             # Only text that carries the heading describes the place, so only
             # that text is read for things. A refusal names nothing.
             for noun in harvest_nouns(text):
@@ -217,6 +238,17 @@ class EpisodicMemory:
                     place.nouns.append(noun)
             self.here = name
             self.heading_shown = self.step
+            # The heading settles it. A move refused leaves you where you were
+            # and the very next heading is the same one, one turn later; a move
+            # into an unlit place shows no heading for as long as it stays
+            # unlit. So: same heading, or only a turn's gap, and those entries
+            # were filed correctly. Otherwise they were typed somewhere this
+            # record cannot name, and the journal leaves them alone.
+            wandered = name != self._unsettled_place and self.step - self._unsettled_since >= 2
+            for entry in self._unsettled:
+                entry.stale = wandered
+            self._unsettled.clear()
+            self._unsettled_place = ""
 
     def record(self, command: str, reply: str) -> Entry:
         """File one exchange under the heading that was showing when it was typed."""
@@ -234,7 +266,16 @@ class EpisodicMemory:
         entry.latest = outcome
         entry.count += 1
         entry.last = self.step
+        if self._unsettled_place:
+            entry.stale = True          # provisional; the next heading decides
+            self._unsettled.append(entry)
         entry.led_to, entry.reply = led_to, flat
+        if not led_to and not self._unsettled_place and parse_movement(key) is not None:
+            # A move with no heading in the reply: either it was refused, or it
+            # took you somewhere the text cannot name — a dark room. Which one
+            # is not knowable yet, so say so rather than guess.
+            self._unsettled_place = self.here or NO_HEADING
+            self._unsettled_since = self.step
         if key in INVENTORY_WORDS:
             self.inventory = (" ".join(reply.split())[:MAX_INVENTORY_CHARS], self.step)
         self._note_verb(key, reply)

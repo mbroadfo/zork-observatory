@@ -20,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .agents import DEFAULT_NUM_CTX, build_agent, default_history, parse_think
+from .journal import Journal
 from .notebook import MODES as NOTEBOOK_MODES, Notebook
 from .agents.simple import HumanAgent
 from .engine import build_engine, engine_seed
@@ -161,6 +162,7 @@ class NewSession(BaseModel):
     num_ctx: int = DEFAULT_NUM_CTX   # ollama: smaller keeps a big model on the GPU
     nudge: bool = False          # ollama: re-ask once on a command already seen to do nothing here
     candidates: bool = False     # ollama: rank three, play the first not already seen to be inert
+    journal: str = "off"         # ollama: off | carry | new — the world's shape, kept across runs
     agenda: bool = False         # ollama: untried directions and unused words, added to the record
     vocabulary: bool = False     # ollama: what the parser's replies have said about its own words
     history_turns: int | None = None   # None: the recall mode's default
@@ -255,6 +257,8 @@ async def new_session(req: NewSession) -> JSONResponse:
     await hub.teardown()
     if req.notebook not in NOTEBOOK_MODES:
         return JSONResponse({"error": f"notebook must be one of {NOTEBOOK_MODES}"}, status_code=400)
+    if req.journal not in NOTEBOOK_MODES:
+        return JSONResponse({"error": f"journal must be one of {NOTEBOOK_MODES}"}, status_code=400)
     total = max(1, min(req.runs, MAX_SERIES))
     try:
         session = await launch(req, series={"index": 1, "total": total} if total > 1 else None)
@@ -281,6 +285,12 @@ async def launch(req: NewSession, series: dict[str, int] | None = None) -> Sessi
     # A replay should run to its end; the budget is for agents that explore.
     max_turns = max(req.max_turns, len(script) + 20) if script else req.max_turns
 
+    journal = None
+    if req.journal != "off":
+        journal = Journal.open(
+            NOTEBOOK_DIR, engine.story or engine.name, f"{req.agent}:{req.model}",
+            fresh=req.journal == "new",
+        )
     try:
         history = req.history_turns if req.history_turns is not None else default_history(req.recall)
         agent = build_agent(
@@ -298,6 +308,7 @@ async def launch(req: NewSession, series: dict[str, int] | None = None) -> Sessi
             candidates=req.candidates,
             agenda=req.agenda,
             vocabulary=req.vocabulary,
+            journal=journal,
         )
     except Exception as exc:
         engine.close()

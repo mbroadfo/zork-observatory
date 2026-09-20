@@ -1228,6 +1228,7 @@ function syncAgentControls() {
   $("recall").style.display = claude || local ? "" : "none";
   $("scaffold").style.display = local ? "" : "none";
   $("notebook").style.display = claude || local ? "" : "none";
+  $("journal").style.display = local ? "" : "none";
   $("input-row").classList.toggle("on", agent === "human");
   if (local) loadLocalModels();
 }
@@ -1285,6 +1286,7 @@ $("new-run").onclick = async () => {
     vocabulary: $("scaffold").value.includes("vocab"),
     runs: parseInt($("runs").value, 10) || 1,
     notebook: llm ? $("notebook").value : "off",
+    journal: $("agent").value === "ollama" ? $("journal").value : "off",
     engine: $("engine").value,
     rom: $("rom").value || null,
     agent: $("agent").value,

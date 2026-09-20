@@ -10,6 +10,7 @@ from pathlib import Path
 from .agents import AGENTS, DEFAULT_NUM_CTX, RECALL_MODES, build_agent, default_history, parse_think
 from .engine import build_engine, engine_seed
 from .events import Event, EventBus
+from .journal import Journal
 from .notebook import MODES as NOTEBOOK_MODES, Notebook
 from .session import Session, SessionConfig
 from .trace import TraceWriter, read_events, trace_header
@@ -45,6 +46,10 @@ def _add_run_args(p: argparse.ArgumentParser) -> None:
                    help="LLM agents: transcript (a rolling window of raw exchanges) or episodic "
                         "(every command filed under the heading it was typed at, with its reply "
                         "and a count — see agents/episodic.py)")
+    p.add_argument("--journal", default="off", choices=list(NOTEBOOK_MODES),
+                   help="ollama only: what stays true of the world across runs — topology, first "
+                        "sight, and what has been seen to do something. Written every turn, "
+                        "kept beside the notebook. off (default), carry, or new")
     p.add_argument("--agenda", action="store_true",
                    help="ollama only: add to the record the directions not yet typed here and the "
                         "words this place's text used that no command here has. The largest "
@@ -96,13 +101,19 @@ async def _play_once(args: argparse.Namespace, notebook_mode: str, series: dict[
     if script:
         # A replay runs to its end; the budget is for agents that explore.
         args.turns = max(args.turns, len(script) + 20)
+    journal = None
+    if args.journal != "off":
+        journal = Journal.open(
+            Path("traces") / "notebooks", engine.story or engine.name,
+            f"{args.agent}:{args.model or ''}", fresh=args.journal == "new",
+        )
     try:
         agent = build_agent(
             args.agent, commands=script, seed=args.seed, model=args.model, effort=args.effort,
             history_turns=args.history_turns, info_level=args.info_level,
             think=parse_think(args.think), recall=args.recall, num_ctx=args.num_ctx,
             nudge=args.nudge, candidates=args.candidates,
-            agenda=args.agenda, vocabulary=args.vocabulary,
+            agenda=args.agenda, vocabulary=args.vocabulary, journal=journal,
         )
     except ValueError as exc:
         print(exc, file=sys.stderr)

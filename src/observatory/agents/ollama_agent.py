@@ -137,6 +137,7 @@ class OllamaAgent(Agent):
         candidates: bool = False,
         agenda: bool = False,
         vocabulary: bool = False,
+        journal: Any = None,
     ) -> None:
         if not model:
             raise ValueError("an Ollama model name is required, e.g. qwen3:8b")
@@ -158,7 +159,15 @@ class OllamaAgent(Agent):
         # to be measurable rather than assumed. See EpisodicMemory.render.
         self.agenda = agenda
         self.vocabulary = vocabulary
-        self.episodes = EpisodicMemory() if recall == "episodic" or nudge or candidates else None
+        # What stays true of the world between runs: topology, first sight,
+        # and what has been seen to do something. Opened by whoever knows the
+        # story (cli.py, server.py) and written after every turn. See journal.py.
+        self.journal = journal
+        self.episodes = (
+            EpisodicMemory()
+            if recall == "episodic" or nudge or candidates or journal is not None
+            else None
+        )
         self.info_level = info_level
         self.system = prompts.get(info_level)
         # None leaves the model's own default; False/True or low/medium/high
@@ -180,6 +189,7 @@ class OllamaAgent(Agent):
         suffix += "+candidates" if candidates else ""
         suffix += "+agenda" if agenda else ""
         suffix += "+vocab" if vocabulary else ""
+        suffix += "+journal" if journal is not None else ""
         self.name = f"ollama:{model}{suffix}"
         self._totals: dict[str, Any] = {
             "input_tokens": 0,
@@ -312,6 +322,11 @@ class OllamaAgent(Agent):
             action = await self._nudged(action, ctx)
         if self.episodes is not None:
             self.episodes.after_move(action.command)
+        if self.journal is not None and self.episodes is not None:
+            # Written every turn: a run stopped halfway leaves the world's
+            # shape behind rather than throwing it away.
+            self.journal.absorb(self.episodes)
+            self.journal.save()
         return action
 
     async def _nudged(self, action: AgentAction, ctx: TurnContext) -> AgentAction:
@@ -350,6 +365,9 @@ class OllamaAgent(Agent):
                 self.episodes.render(agenda=self.agenda, vocabulary=self.vocabulary)
                 if self.recall == "episodic" else ""
             )
+        if self.journal is not None:
+            known = self.journal.render()
+            record = f"{known}\n\n{record}" if record else known
         prompt = llm.turn_prompt(self.memory, ctx, self.history_turns, record)
         if extra:
             prompt += "\n\n" + extra
@@ -472,6 +490,7 @@ class OllamaAgent(Agent):
             "candidates": self.candidates,
             "agenda": self.agenda,
             "vocabulary": self.vocabulary,
+            "journal": self.journal.summary() if self.journal is not None else None,
             "info_level": self.info_level,
             "system_prompt": self.system,
             "system_fingerprint": prompts.fingerprint(self.info_level),

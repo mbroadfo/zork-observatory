@@ -78,5 +78,6 @@ def build_agent(kind: str, **kwargs) -> Agent:
             candidates=bool(kwargs.get("candidates")),
             agenda=bool(kwargs.get("agenda")),
             vocabulary=bool(kwargs.get("vocabulary")),
+            journal=kwargs.get("journal"),
         )
     raise ValueError(f"Unknown agent: {kind!r} (expected {', '.join(AGENTS)})")
