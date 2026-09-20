@@ -101,6 +101,11 @@ move tells you nothing you were not just told. Spend the turn on a direction or 
 an object instead.
 
 Movement is not the point.
+- When more than one thing is possible here, prefer in this order: first an \
+action that would change something — open, take, move, turn on, unlock; then a \
+direction you have not tried from here; then anything else. Looking twice in \
+the same place without having changed something in between is never the best \
+move available.
 - Points come from acting on the world: taking what is valuable, putting things \
 where they belong, opening what is shut, solving what blocks you.
 - Work each new description: every noun printed is something to examine, \

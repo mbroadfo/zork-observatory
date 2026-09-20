@@ -112,6 +112,16 @@ class TestTheLadderIsActuallyALadder:
         for idea in ["examine", "search", "take", "open", "inventory"]:
             assert idea in text
 
+    def test_coached_ranks_what_to_do_when_several_things_are_possible(self):
+        """qwen3:14b would spend a turn on `look around` with three untried
+        directions and an unopened sack in the room. Scattered hints did not
+        settle that; one order might."""
+        text = prompts.get("coached").lower()
+        ranked = text[text.index("prefer in this order"):]
+        order = [ranked.index(w) for w in ["change something", "not tried", "anything else"]]
+        assert order == sorted(order)
+        assert "looking twice in the same place" in text
+
     def test_only_coached_carries_any_of_this(self):
         """Every claim above is coaching, so none of it may appear elsewhere."""
         for level in CLEAN:
