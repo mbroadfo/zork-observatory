@@ -1226,6 +1226,7 @@ function syncAgentControls() {
   $("nudge").style.display = local ? "" : "none";
   $("info").style.display = claude || local ? "" : "none";
   $("recall").style.display = claude || local ? "" : "none";
+  $("scaffold").style.display = local ? "" : "none";
   $("notebook").style.display = claude || local ? "" : "none";
   $("input-row").classList.toggle("on", agent === "human");
   if (local) loadLocalModels();
@@ -1280,6 +1281,8 @@ $("new-run").onclick = async () => {
     num_ctx: parseInt($("numctx").value, 10) || 16384,
     nudge: $("nudge").value === "1",
     candidates: $("nudge").value === "2",
+    agenda: $("scaffold").value.includes("agenda"),
+    vocabulary: $("scaffold").value.includes("vocab"),
     runs: parseInt($("runs").value, 10) || 1,
     notebook: llm ? $("notebook").value : "off",
     engine: $("engine").value,

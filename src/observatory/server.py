@@ -161,6 +161,8 @@ class NewSession(BaseModel):
     num_ctx: int = DEFAULT_NUM_CTX   # ollama: smaller keeps a big model on the GPU
     nudge: bool = False          # ollama: re-ask once on a command already seen to do nothing here
     candidates: bool = False     # ollama: rank three, play the first not already seen to be inert
+    agenda: bool = False         # ollama: untried directions and unused words, added to the record
+    vocabulary: bool = False     # ollama: what the parser's replies have said about its own words
     history_turns: int | None = None   # None: the recall mode's default
     valid_actions: bool = False
     record: bool = True
@@ -294,6 +296,8 @@ async def launch(req: NewSession, series: dict[str, int] | None = None) -> Sessi
             num_ctx=req.num_ctx,
             nudge=req.nudge,
             candidates=req.candidates,
+            agenda=req.agenda,
+            vocabulary=req.vocabulary,
         )
     except Exception as exc:
         engine.close()

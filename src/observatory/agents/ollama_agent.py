@@ -135,6 +135,8 @@ class OllamaAgent(Agent):
         recall: str = "transcript",
         nudge: bool = False,
         candidates: bool = False,
+        agenda: bool = False,
+        vocabulary: bool = False,
     ) -> None:
         if not model:
             raise ValueError("an Ollama model name is required, e.g. qwen3:8b")
@@ -151,6 +153,11 @@ class OllamaAgent(Agent):
         # know to be inert here. Cheaper than the nudge (one call, not two) and
         # the skip is an act rather than a request.
         self.candidates = candidates
+        # Two further scaffolds over the same record, off unless asked for.
+        # They give away more than the record does, so what they are worth has
+        # to be measurable rather than assumed. See EpisodicMemory.render.
+        self.agenda = agenda
+        self.vocabulary = vocabulary
         self.episodes = EpisodicMemory() if recall == "episodic" or nudge or candidates else None
         self.info_level = info_level
         self.system = prompts.get(info_level)
@@ -171,6 +178,8 @@ class OllamaAgent(Agent):
         suffix += "" if recall == "transcript" else f"+{recall}"
         suffix += "+nudge" if nudge else ""
         suffix += "+candidates" if candidates else ""
+        suffix += "+agenda" if agenda else ""
+        suffix += "+vocab" if vocabulary else ""
         self.name = f"ollama:{model}{suffix}"
         self._totals: dict[str, Any] = {
             "input_tokens": 0,
@@ -337,7 +346,10 @@ class OllamaAgent(Agent):
         if self.episodes is not None:
             if not extra:
                 self.episodes.before_move(ctx)
-            record = self.episodes.render() if self.recall == "episodic" else ""
+            record = (
+                self.episodes.render(agenda=self.agenda, vocabulary=self.vocabulary)
+                if self.recall == "episodic" else ""
+            )
         prompt = llm.turn_prompt(self.memory, ctx, self.history_turns, record)
         if extra:
             prompt += "\n\n" + extra
@@ -458,6 +470,8 @@ class OllamaAgent(Agent):
             "recall": self.recall,
             "nudge": self.nudge,
             "candidates": self.candidates,
+            "agenda": self.agenda,
+            "vocabulary": self.vocabulary,
             "info_level": self.info_level,
             "system_prompt": self.system,
             "system_fingerprint": prompts.fingerprint(self.info_level),

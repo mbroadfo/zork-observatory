@@ -338,8 +338,22 @@ class EpisodicMemory:
             parts.append(f"+{len(ranked) - max_outcomes} other replies")
         return f"> {e.command}{times}{when} → " + " · ".join(parts)
 
-    def render(self) -> str:
-        """The record as the agent sees it, or "" before anything is in it."""
+    def render(self, agenda: bool = False, vocabulary: bool = False) -> str:
+        """The record as the agent sees it, or "" before anything is in it.
+
+        Three scaffolds, separately switched, because they give away different
+        amounts and only a run with one of them on can say what it was worth:
+
+          the record     what you typed and what came back. Bookkeeping the
+                         player did themselves.
+          vocabulary     the three lists the parser's own replies supply:
+                         first words taken, first words refused, words known
+                         but absent. Restating what the game already said.
+          agenda         directions not yet typed here, and words this place's
+                         text used that you have not. The largest giveaway:
+                         reading the description for things to act on is a step
+                         the player would otherwise have to take.
+        """
         if not any(h.entries for h in self.headings.values()):
             return ""
         lines = [
@@ -349,18 +363,18 @@ class EpisodicMemory:
             "how many of those times it came back.",
             "",
         ]
-        if self.verbs_taken:
+        if vocabulary and self.verbs_taken:
             lines.append("First words the parser has taken from you: " + ", ".join(self.verbs_taken))
-        if self.verbs_refused:
+        if vocabulary and self.verbs_refused:
             lines.append(
                 "First words it said it does not know: " + ", ".join(self.verbs_refused)
             )
-        if self.absent:
+        if vocabulary and self.absent:
             lines.append(
                 "Words it knows but said were not present where you typed them: "
                 + ", ".join(self.absent)
             )
-        if self.verbs_taken or self.verbs_refused or self.absent:
+        if vocabulary and (self.verbs_taken or self.verbs_refused or self.absent):
             lines.append("")
         if self.inventory:
             text, step = self.inventory
@@ -382,7 +396,7 @@ class EpisodicMemory:
         # not tell you. Both lines are subtraction, not advice: directions you
         # have not typed here, and words this place's own text printed that
         # none of your commands here have mentioned.
-        if here:
+        if agenda and here:
             untried = here.untried_directions()
             if untried:
                 lines.append("  Directions not yet typed here: " + ", ".join(untried))

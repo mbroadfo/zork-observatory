@@ -162,6 +162,26 @@ class TestFiling:
     def test_nothing_is_rendered_before_anything_is_typed(self):
         assert filed().render() == ""
 
+    def test_the_record_alone_is_the_default(self):
+        """Three scaffolds, separately switched. Bundling them made a single
+        choice give away far more than it said it did."""
+        mem = filed(("north", CLEARING), ("use grating", 'I don\'t know the word "use".'))
+        plain = mem.render()
+        assert "Directions not yet typed here" not in plain
+        assert "Words this place's text used" not in plain
+        assert "parser has taken from you" not in plain
+        assert "> use grating" in plain          # the record itself is still there
+        assert "Directions not yet typed here" in mem.render(agenda=True)
+        assert "does not know: use" in mem.render(vocabulary=True)
+
+    def test_each_scaffold_is_named_in_the_player(self):
+        bare = build_agent("ollama", model="qwen3:14b", recall="episodic")
+        both = build_agent("ollama", model="qwen3:14b", recall="episodic",
+                           agenda=True, vocabulary=True)
+        assert bare.name == "ollama:qwen3:14b+episodic"
+        assert both.name == "ollama:qwen3:14b+episodic+agenda+vocab"
+        assert bare.describe()["agenda"] is False and bare.describe()["vocabulary"] is False
+
 
 class TestTheAgenda:
     """What is left here, which a record of what you did does not say.
@@ -172,7 +192,7 @@ class TestTheAgenda:
     """
 
     def listed(self, mem, heading: str) -> list[str]:
-        line = next(ln for ln in mem.render().splitlines() if heading in ln)
+        line = next(ln for ln in mem.render(agenda=True).splitlines() if heading in ln)
         return [w.strip() for w in line.split(":", 1)[1].split(",")]
 
     def test_directions_not_yet_typed_here(self):
@@ -196,7 +216,7 @@ class TestTheAgenda:
     def test_a_refusal_names_nothing(self):
         """Only text carrying the heading describes the place."""
         mem = filed(("north", CLEARING), ("xyzzy", "A hollow voice says fool."))
-        line = next(ln for ln in mem.render().splitlines() if "Words this place" in ln)
+        line = next(ln for ln in mem.render(agenda=True).splitlines() if "Words this place" in ln)
         assert "hollow" not in line and "voice" not in line
 
     def test_directions_are_not_listed_as_things(self):
@@ -205,7 +225,7 @@ class TestTheAgenda:
 
     def test_the_agenda_is_for_where_you_stand(self):
         mem = filed(("north", CLEARING), ("s", PATH))
-        assert mem.render().count("Directions not yet typed here") == 1
+        assert mem.render(agenda=True).count("Directions not yet typed here") == 1
         assert "tree" in self.listed(mem, "Words this place")
 
 
@@ -216,20 +236,20 @@ class TestTheVerbsItHasEstablished:
     def test_a_word_the_parser_took_is_listed(self):
         mem = filed(("open mailbox", "Opening the small mailbox reveals a leaflet."),
                     ("take leaflet", "Taken."))
-        line = next(ln for ln in mem.render().splitlines() if "has taken from you" in ln)
+        line = next(ln for ln in mem.render(vocabulary=True).splitlines() if "has taken from you" in ln)
         assert "open" in line and "take" in line
 
     def test_a_word_it_does_not_know_is_listed_apart(self):
         mem = filed(("use leaflet on grating", 'I don\'t know the word "use".'),
                     ("open mailbox", "Opened."))
-        text = mem.render()
+        text = mem.render(vocabulary=True)
         assert "does not know: use" in text
         assert "use" not in next(ln for ln in text.splitlines() if "has taken from you" in ln)
 
     def test_a_refusal_about_a_noun_does_not_condemn_the_verb(self):
         """"You can't see any match here" is about the match, not about `look`."""
         mem = filed(("look for match", "You can't see any match here!"))
-        assert "look" in next(ln for ln in mem.render().splitlines() if "has taken" in ln)
+        assert "look" in next(ln for ln in mem.render(vocabulary=True).splitlines() if "has taken" in ln)
 
     def test_an_unknown_noun_settles_nothing_about_the_verb(self):
         """The parser names the word it does not know. When that word is the
@@ -239,11 +259,11 @@ class TestTheVerbsItHasEstablished:
         assert mem.summary()["verbs_refused"] == 0
         # ...and the same verb is judged on a sentence the parser did take.
         mem.record("look", "West of House\nAn open field.")
-        assert "look" in next(ln for ln in mem.render().splitlines() if "has taken" in ln)
+        assert "look" in next(ln for ln in mem.render(vocabulary=True).splitlines() if "has taken" in ln)
 
     def test_each_word_is_judged_once(self):
         mem = filed(("open mailbox", "Opened."), ("open sack", "Opened."), ("open door", "Locked."))
-        line = next(ln for ln in mem.render().splitlines() if "has taken" in ln)
+        line = next(ln for ln in mem.render(vocabulary=True).splitlines() if "has taken" in ln)
         assert line.count("open") == 1
 
     def test_words_it_knows_but_said_were_not_there(self):
@@ -253,7 +273,7 @@ class TestTheVerbsItHasEstablished:
         mem = filed(("look for lantern", "You can't see any lantern here!"),
                     ("look at bird", "You can't see any songbird here."),
                     ("look for flashlight", 'I don\'t know the word "flashlight".'))
-        line = next(ln for ln in mem.render().splitlines() if "not present" in ln)
+        line = next(ln for ln in mem.render(vocabulary=True).splitlines() if "not present" in ln)
         assert "lantern" in line and "songbird" in line
         assert "flashlight" not in line          # the parser never knew that one
 

@@ -65,6 +65,12 @@
       <option value="transcript" selected title="The last 30 exchanges, verbatim">recall: transcript</option>
       <option value="episodic" title="Every command filed under the heading it was typed at, with its reply and a count; plus the last exchange">recall: episodic record</option>
     </select>
+    <select id="scaffold" title="Extra lists added to the record. Each gives away more than the record itself, so each is measured on its own." style="display:none">
+      <option value="" selected>record only</option>
+      <option value="vocab" title="What the parser's own replies have said about its vocabulary: first words taken and refused, words known but absent">+ vocabulary</option>
+      <option value="agenda" title="Directions not yet typed here, and words this place's text used that no command here has. Reads the description for things to act on.">+ agenda</option>
+      <option value="agenda,vocab">+ agenda + vocabulary</option>
+    </select>
     <input type="number" id="turns" value="200" min="1" max="5000" size="4"
            title="Turn BUDGET — the game has no turn limit. Runs stopped by it are marked censored." style="width:70px">
     <select id="lives" title="Times the world may be rolled back after a death. The agent keeps its memory across a rollback.">
