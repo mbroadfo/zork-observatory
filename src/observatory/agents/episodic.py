@@ -182,6 +182,10 @@ class EpisodicMemory:
         # `open` and `pour` working is missing something it already knows.
         self.verbs_taken: list[str] = []
         self.verbs_refused: list[str] = []
+        # Words the parser recognised but said were not present, in its own
+        # words ("You can't see any lantern here!"). A player hunting a lamp in
+        # a forest is inventing nouns; these are the ones the game has used.
+        self.absent: list[str] = []
         # What was last typed and when, so the next observation can be
         # matched to it — or recognised as not a reply to it at all.
         self._pending: str | None = None
@@ -228,6 +232,7 @@ class EpisodicMemory:
         if key in INVENTORY_WORDS:
             self.inventory = (" ".join(reply.split())[:MAX_INVENTORY_CHARS], self.step)
         self._note_verb(key, reply)
+        self._note_absent(reply)
         self._see(reply)
         return entry
 
@@ -264,6 +269,13 @@ class EpisodicMemory:
             self.verbs_refused.append(verb)
         elif not unknown:
             self.verbs_taken.append(verb)
+
+    def _note_absent(self, reply: str) -> None:
+        missing = re.search(r"can't see (?:any|the) ([a-z' -]+?)(?: here)?[.!]", reply.lower())
+        if missing:
+            word = missing.group(1).split()[-1]
+            if word not in self.absent:
+                self.absent.append(word)
 
     def relocate(self, texts: list[str]) -> None:
         """The world moved under the player (a rollback, a restore): take the
@@ -343,7 +355,12 @@ class EpisodicMemory:
             lines.append(
                 "First words it said it does not know: " + ", ".join(self.verbs_refused)
             )
-        if self.verbs_taken or self.verbs_refused:
+        if self.absent:
+            lines.append(
+                "Words it knows but said were not present where you typed them: "
+                + ", ".join(self.absent)
+            )
+        if self.verbs_taken or self.verbs_refused or self.absent:
             lines.append("")
         if self.inventory:
             text, step = self.inventory

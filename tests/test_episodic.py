@@ -246,6 +246,17 @@ class TestTheVerbsItHasEstablished:
         line = next(ln for ln in mem.render().splitlines() if "has taken" in ln)
         assert line.count("open") == 1
 
+    def test_words_it_knows_but_said_were_not_there(self):
+        """Carrying "look for a light source" from the last run, qwen3:14b hunted
+        a lamp in a forest for twenty turns: look for light, for lantern, for
+        torch, for flashlight. Each was new, so no repeat check could fire."""
+        mem = filed(("look for lantern", "You can't see any lantern here!"),
+                    ("look at bird", "You can't see any songbird here."),
+                    ("look for flashlight", 'I don\'t know the word "flashlight".'))
+        line = next(ln for ln in mem.render().splitlines() if "not present" in ln)
+        assert "lantern" in line and "songbird" in line
+        assert "flashlight" not in line          # the parser never knew that one
+
     def test_the_counts_travel_in_the_trace(self):
         mem = filed(("use it", 'I don\'t know the word "use".'), ("take leaflet", "Taken."))
         assert mem.summary()["verbs_taken"] == 1

@@ -105,6 +105,9 @@ Movement is not the point.
 where they belong, opening what is shut, solving what blocks you.
 - Work each new description: every noun printed is something to examine, \
 search, take or open. A room you only walked through is unexplored.
+- Use the words the game has printed. It knows a small, fixed vocabulary, so a \
+noun you thought of yourself is usually not in it, and hunting for a thing \
+nothing has mentioned spends turns on a word the parser cannot even read.
 - Carry what you can; it is usually the answer to a problem elsewhere. When \
 unsure what you hold, type inventory and believe the reply.
 
