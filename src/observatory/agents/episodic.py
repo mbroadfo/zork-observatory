@@ -174,6 +174,11 @@ class EpisodicMemory:
         self.headings: dict[str, Heading] = {}
         self.here = NO_HEADING
         self.step = 0
+        # When the heading was last printed. A dark room prints none, so the
+        # record kept filing under "Kitchen" while the player stood in the
+        # unlit attic — and the model reasoned about the kitchen. Truthful and
+        # silently stale, which is worse than either.
+        self.heading_shown = 0
         # The latest reply to an inventory command the player typed, whole,
         # and the step it came back at. Only ever the game's words.
         self.inventory: tuple[str, int] | None = None
@@ -211,6 +216,7 @@ class EpisodicMemory:
                 if noun not in place.nouns and noun not in _NOT_A_THING and noun not in name.lower():
                     place.nouns.append(noun)
             self.here = name
+            self.heading_shown = self.step
 
     def record(self, command: str, reply: str) -> Entry:
         """File one exchange under the heading that was showing when it was typed."""
@@ -383,7 +389,14 @@ class EpisodicMemory:
         here = self.headings.get(self.here)
         label = self.here or "(no heading yet)"
         shown = f", shown {here.shown} times" if here and here.shown > 1 else ""
-        lines.append(f"Under the current heading, {label}{shown}:")
+        stale = self.step - self.heading_shown
+        if stale > 0 and self.headings:
+            lines.append(
+                f"The text has not printed a heading for {self._ago(self.heading_shown)}, so you "
+                f"may no longer be where {label} was. Filed under it until it prints another:"
+            )
+        else:
+            lines.append(f"Under the current heading, {label}{shown}:")
         entries = sorted(here.entries.values(), key=lambda e: -e.last) if here else []
         for e in entries[:MAX_HERE]:
             lines.append("  " + self._line(e, MAX_REPLY_CHARS, MAX_OUTCOMES_HERE, age=True))

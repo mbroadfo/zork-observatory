@@ -162,6 +162,19 @@ class TestFiling:
     def test_nothing_is_rendered_before_anything_is_typed(self):
         assert filed().render() == ""
 
+    def test_a_heading_that_has_not_been_reprinted_is_marked_stale(self):
+        """qwen3:14b walked up into the unlit attic, which prints no heading,
+        and went on reasoning about the kitchen because the record still said
+        "under the current heading, Kitchen"."""
+        dark = "It is pitch black. You are likely to be eaten by a grue."
+        mem = filed(("north", CLEARING), ("up", dark), ("look", dark))
+        text = mem.render()
+        assert "has not printed a heading for 2 commands ago" in text
+        assert "may no longer be where Clearing was" in text
+        # It comes back the moment the game prints one again.
+        mem.record("light lamp", "Attic\nThis is the attic.")
+        assert "Under the current heading, Attic" in mem.render()
+
     def test_the_record_alone_is_the_default(self):
         """Three scaffolds, separately switched. Bundling them made a single
         choice give away far more than it said it did."""
