@@ -56,6 +56,8 @@ class FakeOllama:
         if not self.answers:
             return reply("look")
         answer = self.answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer      # a scripted failure, for the turn that must survive one
         return answer if isinstance(answer, dict) else reply(answer)
 
 
@@ -256,6 +258,51 @@ class TestTheServer:
         models = await list_models(transport=FakeOllama())
         assert [m["name"] for m in models] == ["llama3.2:latest", "qwen3:8b"]
         assert models[1]["quantization"] == "Q4_K_M"
+
+
+class TestAServerThatCannotCarryASchema:
+    """gpt-oss on Ollama 0.13.5: a JSON schema plus the harmony reply format
+    makes the server read the answer as a tool call and fail the request —
+    "error parsing tool call: raw='open mailbox'" — after a minute and a half.
+    The model answered; the server could not carry it."""
+
+    def harmony(self):
+        return OllamaError("error parsing tool call: raw='open mailbox', err=invalid character 'o'")
+
+    async def test_the_turn_is_asked_again_in_prose_and_still_played(self):
+        fake = FakeOllama([self.harmony(), {"message": {"content": "open mailbox\n\nA box."}}])
+        a = agent(fake, model="qwen3:8b")
+        action = await a.act(ctx())
+        assert action.command == "open mailbox"
+        assert "format" in fake.sent[0] and "format" not in fake.sent[1]
+
+    async def test_it_is_learned_once_not_every_turn(self):
+        fake = FakeOllama([self.harmony(), {"message": {"content": "north"}},
+                           {"message": {"content": "south"}}])
+        a = agent(fake, model="qwen3:8b")
+        await a.act(ctx())
+        assert (await a.act(ctx())).command == "south"
+        assert [("format" in b) for b in fake.sent] == [True, False, False]
+        assert a.describe()["structured_output"] is False
+
+    async def test_a_model_known_to_choke_is_never_asked_under_a_schema(self):
+        fake = FakeOllama([{"message": {"content": "open mailbox"}}])
+        a = agent(fake, model="gpt-oss:20b")
+        assert (await a.act(ctx())).command == "open mailbox"
+        assert "format" not in fake.sent[0]
+
+    async def test_every_other_model_is_still_asked_for_json(self):
+        fake = FakeOllama(["north"])
+        a = agent(fake)
+        await a.act(ctx())
+        assert fake.sent[0]["format"] == llm.MOVE_FIELDS
+        assert a.describe()["structured_output"] is True
+
+    async def test_an_unrelated_error_is_not_swallowed(self):
+        fake = FakeOllama([OllamaError("model runner has unexpectedly stopped")])
+        action = await agent(fake).act(ctx())
+        assert action.meta["error"] is True
+        assert "unexpectedly stopped" in action.thought
 
 
 class TestConfiguration:

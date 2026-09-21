@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import time
 import urllib.error
 import urllib.request
@@ -44,6 +45,15 @@ DEFAULT_NUM_CTX = 16384
 # the request times out.
 DEFAULT_MAX_TOKENS = 4096
 REQUEST_TIMEOUT_S = 300.0   # generous: the first call also loads the weights
+
+# Servers that cannot carry a reply made under a JSON schema, in their own
+# words. Matched against the error text rather than the model name, so a
+# version that fixes it needs no change here.
+_FORMAT_UNSUPPORTED = re.compile(r"parsing tool call|harmony|does not support (?:format|structured)")
+
+# Models known to fail that way before the first call is made. gpt-oss speaks
+# the harmony format, and a minute and a half is too long to learn it twice.
+PLAIN_MODELS = ("gpt-oss",)
 
 # (method, path, body) -> parsed JSON. Swappable so tests need no server.
 Transport = Callable[[str, str, dict[str, Any] | None], Awaitable[dict[str, Any]]]
@@ -178,6 +188,9 @@ class OllamaAgent(Agent):
         self.temperature = temperature
         self.seed = seed
         self.max_tokens = max_tokens
+        # Ask in prose rather than under a schema. Set for models known to
+        # choke on one, and latched the first time a server says so.
+        self.plain = model.startswith(PLAIN_MODELS)
         self.digest = ""
         self.details: dict[str, Any] = {}
         self._send = transport or http_transport(self.host)
@@ -259,15 +272,28 @@ class OllamaAgent(Agent):
         }
         if fmt is not None:
             body["format"] = fmt
+        if fmt is not None and self.plain:
+            body.pop("format", None)
         wanted = think if override else self.think
         if wanted is not None:
             body["think"] = wanted
         try:
             return await self._send("POST", "/api/chat", body)
         except OllamaError as exc:
-            if not override and self.think is not None and "think" in str(exc).lower():
+            reason = str(exc).lower()
+            if not override and self.think is not None and "think" in reason:
                 self.think = None
                 body.pop("think", None)
+                return await self._send("POST", "/api/chat", body)
+            if fmt is not None and not self.plain and _FORMAT_UNSUPPORTED.search(reason):
+                # gpt-oss on Ollama 0.13.5: a schema plus the harmony reply
+                # format makes the server read the answer as a tool call and
+                # fail it — "error parsing tool call: raw='open mailbox'" — at
+                # a minute and a half a turn. The model answered; the server
+                # could not carry it. Asked in prose from here on, and the
+                # first line of the reply is still what it chose to type.
+                self.plain = True
+                body.pop("format", None)
                 return await self._send("POST", "/api/chat", body)
             raise
 
@@ -483,6 +509,7 @@ class OllamaAgent(Agent):
             "details": self.details,
             "host": self.host,
             "think": self.think,
+            "structured_output": not self.plain,
             "options": self._options(self.max_tokens),
             "history_turns": self.history_turns,
             "recall": self.recall,
