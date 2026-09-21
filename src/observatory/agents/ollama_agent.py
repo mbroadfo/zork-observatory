@@ -400,10 +400,23 @@ class OllamaAgent(Agent):
         crowded = self.context_warning(len(prompt) + len(self.system))
         started = time.perf_counter()
         schema = llm.MOVE_FIELDS_RANKED if self.candidates else llm.MOVE_FIELDS
+        retried = ""
         try:
             data = await self._chat(prompt, schema, self.max_tokens)
         except OllamaError as exc:
-            return AgentAction(command="look", thought=f"[ollama error: {exc}]", meta={"error": True})
+            # One more attempt before the turn is spent. A local server fails
+            # in ways a hosted one does not — Ollama 0.13.5 mangles gpt-oss
+            # replies in its own parser, intermittently — and a turn lost to
+            # that is a turn of the run reported as if the player had played
+            # `look`. The second failure is the honest one.
+            retried = str(exc)
+            try:
+                data = await self._chat(prompt, schema, self.max_tokens)
+            except OllamaError as second:
+                return AgentAction(
+                    command="look", thought=f"[ollama error: {second}]",
+                    meta={"error": True, "first_error": retried},
+                )
         inp, out = self._count(data, (time.perf_counter() - started) * 1000)
 
         message = data.get("message") or {}
@@ -412,6 +425,8 @@ class OllamaAgent(Agent):
         overran = data.get("done_reason") == "length" and not command
 
         meta: dict[str, Any] = {"model": self.model, "cost_usd": 0.0}
+        if retried:
+            meta["retried_after"] = retried
         if crowded:
             meta["context_warning"] = crowded
         if self.episodes is not None:

@@ -299,10 +299,27 @@ class TestAServerThatCannotCarryASchema:
         assert a.describe()["structured_output"] is True
 
     async def test_an_unrelated_error_is_not_swallowed(self):
-        fake = FakeOllama([OllamaError("model runner has unexpectedly stopped")])
+        fake = FakeOllama([OllamaError("model runner has unexpectedly stopped")] * 2)
         action = await agent(fake).act(ctx())
         assert action.meta["error"] is True
         assert "unexpectedly stopped" in action.thought
+
+    async def test_one_failure_costs_a_retry_rather_than_the_turn(self):
+        """A turn lost to a server bug is reported as a player who typed
+        `look`. Ollama 0.13.5 does this to gpt-oss replies intermittently."""
+        fake = FakeOllama([self.harmony(), "north"])
+        a = agent(fake, model="gpt-oss:20b")
+        action = await a.act(ctx())
+        assert action.command == "north"
+        assert "parsing tool call" in action.meta["retried_after"]
+        assert len(fake.sent) == 2
+
+    async def test_twice_is_the_honest_answer(self):
+        fake = FakeOllama([self.harmony(), self.harmony()])
+        action = await agent(fake, model="gpt-oss:20b").act(ctx())
+        assert action.command == "look"
+        assert action.meta["error"] is True
+        assert "parsing tool call" in action.meta["first_error"]
 
 
 class TestConfiguration:
