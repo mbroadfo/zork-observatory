@@ -1223,6 +1223,7 @@ function syncAgentControls() {
   $("omodel").style.display = local ? "" : "none";
   $("think").style.display = local ? "" : "none";
   $("numctx").style.display = local ? "" : "none";
+  $("temp").style.display = local ? "" : "none";
   $("nudge").style.display = local ? "" : "none";
   $("info").style.display = claude || local ? "" : "none";
   $("recall").style.display = claude || local ? "" : "none";
@@ -1280,6 +1281,7 @@ $("new-run").onclick = async () => {
   const body = {
     recall: llm ? $("recall").value : "transcript",
     num_ctx: parseInt($("numctx").value, 10) || 16384,
+    temperature: parseFloat($("temp").value),
     nudge: $("nudge").value === "1",
     candidates: $("nudge").value === "2",
     agenda: $("scaffold").value.includes("agenda"),

@@ -19,7 +19,9 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .agents import DEFAULT_NUM_CTX, build_agent, default_history, parse_think
+from .agents import (
+    DEFAULT_NUM_CTX, DEFAULT_TEMPERATURE, build_agent, default_history, parse_think,
+)
 from .journal import Journal
 from .notebook import MODES as NOTEBOOK_MODES, Notebook
 from .agents.simple import HumanAgent
@@ -162,6 +164,7 @@ class NewSession(BaseModel):
     num_ctx: int = DEFAULT_NUM_CTX   # ollama: smaller keeps a big model on the GPU
     nudge: bool = False          # ollama: re-ask once on a command already seen to do nothing here
     candidates: bool = False     # ollama: rank three, play the first not already seen to be inert
+    temperature: float = DEFAULT_TEMPERATURE   # ollama: lower wanders less
     journal: str = "off"         # ollama: off | carry | new — the world's shape, kept across runs
     agenda: bool = False         # ollama: untried directions and unused words, added to the record
     vocabulary: bool = False     # ollama: what the parser's replies have said about its own words
@@ -309,6 +312,7 @@ async def launch(req: NewSession, series: dict[str, int] | None = None) -> Sessi
             agenda=req.agenda,
             vocabulary=req.vocabulary,
             journal=journal,
+            temperature=req.temperature,
         )
     except Exception as exc:
         engine.close()

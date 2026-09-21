@@ -274,6 +274,17 @@ class TestConfiguration:
         with pytest.raises(ValueError, match="model"):
             build_agent("ollama", model=None)
 
+    async def test_temperature_is_a_setting_and_travels_with_the_run(self):
+        """0.7 is a setting for prose. Whether a player follows a rule better
+        at 0.3 is a measurement, so it is a dial and it is recorded."""
+        fake = FakeOllama(["north"])
+        a = build_agent("ollama", model="qwen3:14b", temperature=0.3)
+        a._send = fake
+        await a.act(ctx())
+        assert fake.sent[0]["options"]["temperature"] == 0.3
+        assert a.describe()["options"]["temperature"] == 0.3
+        assert build_agent("ollama", model="q").describe()["options"]["temperature"] == 0.7
+
     def test_the_context_window_is_a_setting(self):
         a = build_agent("ollama", model="qwen3:14b", num_ctx=8192)
         assert a.describe()["options"]["num_ctx"] == 8192

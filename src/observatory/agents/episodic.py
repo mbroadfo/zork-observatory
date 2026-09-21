@@ -104,6 +104,29 @@ def heading_of(text: str) -> str:
     return ""
 
 
+# Clauses that name a thing in order to say it is not there. "There is no door
+# here, and all the windows are boarded up" put `door` on the agenda, and the
+# player spent a turn on `open door` to be told it cannot see any door.
+_DENIAL = re.compile(
+    r"\b(?:there (?:is|are) no|there's no|no longer|nothing but|nothing special|"
+    r"is not|are not|isn't|aren't|cannot|can't|couldn't|won't)\b"
+)
+
+
+def _without_denials(text: str) -> str:
+    """The description with the clauses that deny things dropped.
+
+    Split on the punctuation that separates clauses, not on sentences: "There
+    is no door here, and all the windows are boarded up" denies the door in
+    its first clause and describes the windows in its second.
+    """
+    kept = []
+    for sentence in re.split(r"(?<=[.!?])\s+", text):
+        clauses = re.split(r",\s+|;\s+", sentence)
+        kept.extend(c for c in clauses if not _DENIAL.search(c.lower()))
+    return " ".join(kept)
+
+
 def _shorten(text: str, limit: int) -> str:
     flat = " ".join((text or "").split())
     return flat if len(flat) <= limit else flat[: limit - 1].rstrip() + "…"
@@ -230,7 +253,7 @@ class EpisodicMemory:
             described = text[text.index(name):].strip()
             if not place.first_text:
                 place.first_text = described
-            text = described
+            text = _without_denials(described)
             # Only text that carries the heading describes the place, so only
             # that text is read for things. A refusal names nothing.
             for noun in harvest_nouns(text):

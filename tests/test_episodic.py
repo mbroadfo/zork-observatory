@@ -232,6 +232,22 @@ class TestTheAgenda:
         line = next(ln for ln in mem.render(agenda=True).splitlines() if "Words this place" in ln)
         assert "hollow" not in line and "voice" not in line
 
+    def test_a_thing_the_text_says_is_absent_is_not_on_the_agenda(self):
+        """North of House: "There is no door here, and all the windows are
+        boarded up." qwen3:14b read `door` off the agenda and spent a turn on
+        `open door`, to be told it cannot see any door."""
+        north = ("North of House\nYou are facing the north side of a white house. There is no "
+                 "door here, and all the windows are boarded up. To the north a narrow path "
+                 "winds through the trees.")
+        left = self.listed(filed(("north", north)), "Words this place")
+        assert "door" not in left
+        assert "windows" in left and "path" in left    # the clauses that do describe
+
+    def test_a_denial_does_not_swallow_the_whole_description(self):
+        mem = filed(("look", "Clearing\nThere is nothing special about the tree. A lamp is here."))
+        left = self.listed(mem, "Words this place")
+        assert "lamp" in left and "tree" not in left
+
     def test_directions_are_not_listed_as_things(self):
         """"A path leads south" names a direction, not something to act on."""
         assert "south" not in self.listed(filed(("north", CLEARING)), "Words this place")

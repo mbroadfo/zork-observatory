@@ -7,7 +7,10 @@ import asyncio
 import sys
 from pathlib import Path
 
-from .agents import AGENTS, DEFAULT_NUM_CTX, RECALL_MODES, build_agent, default_history, parse_think
+from .agents import (
+    AGENTS, DEFAULT_NUM_CTX, DEFAULT_TEMPERATURE, RECALL_MODES,
+    build_agent, default_history, parse_think,
+)
 from .engine import build_engine, engine_seed
 from .events import Event, EventBus
 from .journal import Journal
@@ -46,6 +49,9 @@ def _add_run_args(p: argparse.ArgumentParser) -> None:
                    help="LLM agents: transcript (a rolling window of raw exchanges) or episodic "
                         "(every command filed under the heading it was typed at, with its reply "
                         "and a count — see agents/episodic.py)")
+    p.add_argument("--temperature", type=float, default=DEFAULT_TEMPERATURE,
+                   help="ollama only: sampling temperature. 0.7 (the default) is a setting for "
+                        "prose; 0.2-0.3 wanders less and follows an instruction more closely")
     p.add_argument("--journal", default="off", choices=list(NOTEBOOK_MODES),
                    help="ollama only: what stays true of the world across runs — topology, first "
                         "sight, and what has been seen to do something. Written every turn, "
@@ -114,6 +120,7 @@ async def _play_once(args: argparse.Namespace, notebook_mode: str, series: dict[
             think=parse_think(args.think), recall=args.recall, num_ctx=args.num_ctx,
             nudge=args.nudge, candidates=args.candidates,
             agenda=args.agenda, vocabulary=args.vocabulary, journal=journal,
+            temperature=args.temperature,
         )
     except ValueError as exc:
         print(exc, file=sys.stderr)

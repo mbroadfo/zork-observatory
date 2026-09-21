@@ -2,9 +2,13 @@ from . import prompts
 from .base import Agent, AgentAction, TurnContext
 from .llm import RECALL_MODES, default_history
 
-# Kept here so the CLI and server can name the default without importing the
+# Kept here so the CLI and server can name the defaults without importing the
 # Ollama agent (which they only import when one is actually built).
 DEFAULT_NUM_CTX = 16384
+# 0.7 is a setting for writing prose. A player following a rule wants less
+# invention and more follow-through, but how much less is a measurement, so
+# the default is left where it was and the dial is exposed.
+DEFAULT_TEMPERATURE = 0.7
 from .simple import MOCK_WALKTHROUGH, HumanAgent, RandomAgent, ScriptedAgent
 
 __all__ = [
@@ -21,6 +25,7 @@ __all__ = [
     "default_history",
     "AGENTS",
     "DEFAULT_NUM_CTX",
+    "DEFAULT_TEMPERATURE",
     "RECALL_MODES",
 ]
 
@@ -79,5 +84,6 @@ def build_agent(kind: str, **kwargs) -> Agent:
             agenda=bool(kwargs.get("agenda")),
             vocabulary=bool(kwargs.get("vocabulary")),
             journal=kwargs.get("journal"),
+            temperature=kwargs.get("temperature", DEFAULT_TEMPERATURE),
         )
     raise ValueError(f"Unknown agent: {kind!r} (expected {', '.join(AGENTS)})")
