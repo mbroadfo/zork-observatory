@@ -175,8 +175,7 @@ def hub(monkeypatch, tmp_path):
 
     def build(kind, **kw):
         fakes.append(Reflective())
-        return OllamaAgent("qwen3:8b", transport=fakes[-1], recall=kw.get("recall", "transcript"),
-                           history_turns=kw["history_turns"])
+        return OllamaAgent("qwen3:8b", transport=fakes[-1], history_turns=kw["history_turns"])
 
     monkeypatch.setattr(server, "build_agent", build)
     monkeypatch.setattr(server, "NOTEBOOK_DIR", tmp_path / "notebooks")
@@ -232,13 +231,13 @@ class TestASeriesOnTheServer:
         res = await server.new_session(req)
         assert res.status_code == 400
 
-    async def test_the_episodic_window_default_reaches_the_session(self, hub):
+    async def test_the_transcript_window_reaches_the_session(self, hub):
         req = server.NewSession(engine="mock", agent="ollama", model="qwen3:8b", record=False,
-                                recall="episodic")
+                                history_turns=12)
         await server.new_session(req)
         try:
-            assert server.hub.session.config.history_turns == 1
-            assert server.hub.session.agent.name.endswith("+episodic")
+            assert server.hub.session.config.history_turns == 12
+            assert server.hub.session.agent.name == "ollama:qwen3:8b"
         finally:
             await server.hub.teardown()
 

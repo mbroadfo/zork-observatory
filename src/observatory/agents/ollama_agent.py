@@ -34,7 +34,6 @@ from typing import Any, Awaitable, Callable
 
 from . import llm, prompts
 from .base import Agent, AgentAction, TurnContext
-from .episodic import EpisodicMemory
 
 DEFAULT_HOST = "http://localhost:11434"
 DEFAULT_INFO_LEVEL = "parser"
@@ -142,42 +141,12 @@ class OllamaAgent(Agent):
         seed: int | None = None,
         max_tokens: int | None = DEFAULT_MAX_TOKENS,
         transport: Transport | None = None,
-        recall: str = "transcript",
-        nudge: bool = False,
-        candidates: bool = False,
-        agenda: bool = False,
-        vocabulary: bool = False,
-        journal: Any = None,
     ) -> None:
         if not model:
             raise ValueError("an Ollama model name is required, e.g. qwen3:8b")
-        llm.default_history(recall)   # validates
         self.model = model
         self.host = resolve_host(host)
         self.history_turns = history_turns
-        self.recall = recall
-        # One re-ask when the model picks a command its own record shows doing
-        # nothing here. The record is kept either way when nudging is on; with
-        # `transcript` recall it is used for this and never shown.
-        self.nudge = nudge
-        # Ask for a ranked list and play the first the record does not already
-        # know to be inert here. Cheaper than the nudge (one call, not two) and
-        # the skip is an act rather than a request.
-        self.candidates = candidates
-        # Two further scaffolds over the same record, off unless asked for.
-        # They give away more than the record does, so what they are worth has
-        # to be measurable rather than assumed. See EpisodicMemory.render.
-        self.agenda = agenda
-        self.vocabulary = vocabulary
-        # What stays true of the world between runs: topology, first sight,
-        # and what has been seen to do something. Opened by whoever knows the
-        # story (cli.py, server.py) and written after every turn. See journal.py.
-        self.journal = journal
-        self.episodes = (
-            EpisodicMemory()
-            if recall == "episodic" or nudge or candidates or journal is not None
-            else None
-        )
         self.info_level = info_level
         self.system = prompts.get(info_level)
         # None leaves the model's own default; False/True or low/medium/high
@@ -195,14 +164,6 @@ class OllamaAgent(Agent):
         self.details: dict[str, Any] = {}
         self._send = transport or http_transport(self.host)
         suffix = "" if info_level == DEFAULT_INFO_LEVEL else f"/{info_level}"
-        # Part of the name because it is part of the player: a notebook kept by
-        # one memory architecture is not the other's to inherit.
-        suffix += "" if recall == "transcript" else f"+{recall}"
-        suffix += "+nudge" if nudge else ""
-        suffix += "+candidates" if candidates else ""
-        suffix += "+agenda" if agenda else ""
-        suffix += "+vocab" if vocabulary else ""
-        suffix += "+journal" if journal is not None else ""
         self.name = f"ollama:{model}{suffix}"
         self._totals: dict[str, Any] = {
             "input_tokens": 0,
@@ -313,93 +274,25 @@ class OllamaAgent(Agent):
     @staticmethod
     def _parse(message: dict[str, Any]) -> tuple[str, str, bool]:
         """(command, reasoning, structured) from a reply."""
-        command, _, reasoning, structured = OllamaAgent._parse_ranked(message)
-        return command, reasoning, structured
-
-    @staticmethod
-    def _parse_ranked(message: dict[str, Any]) -> tuple[str, list[str], str, bool]:
-        """(command, alternatives, reasoning, structured) from a reply."""
         text = (message.get("content") or "").strip()
         try:
             parsed = json.loads(text)
-            raw = parsed.get("alternatives") or []
-            alternatives = [
-                cleaned for cleaned in (llm.clean_command(str(a)) for a in raw if isinstance(a, str))
-                if cleaned
-            ]
             return (
                 llm.clean_command(str(parsed.get("command", ""))),
-                alternatives,
                 str(parsed.get("reasoning", "")).strip(),
                 True,
             )
         except (json.JSONDecodeError, AttributeError):
-            # Small models sometimes answer in prose despite the format. The
-            # first line is still what it chose to type, and is kept as such.
-            return llm.clean_command(text), [], "[reply was not in the requested format]", False
+            # Small models sometimes answer in prose despite the format, and a
+            # server that cannot carry a schema is asked in prose deliberately.
+            # The first line is still what it chose to type.
+            return llm.clean_command(text), "[reply was not in the requested format]", False
 
     async def act(self, ctx: TurnContext) -> AgentAction:
-        action = await self._act(ctx)
-        # A ranked list that is inert all the way down is the moment the player
-        # is most stuck, and the one moment the filter has nothing left to do.
-        # Ask again there, whether or not the nudge was asked for.
-        wants_nudge = self.nudge or action.meta.get("all_candidates_inert")
-        if wants_nudge and self.episodes is not None and not action.meta.get("error"):
-            action = await self._nudged(action, ctx)
-        if self.episodes is not None:
-            self.episodes.after_move(action.command)
-        if self.journal is not None and self.episodes is not None:
-            # Written every turn: a run stopped halfway leaves the world's
-            # shape behind rather than throwing it away.
-            self.journal.absorb(self.episodes)
-            self.journal.save()
-        return action
-
-    async def _nudged(self, action: AgentAction, ctx: TurnContext) -> AgentAction:
-        """Ask once more when the chosen command has already done nothing here.
-
-        Only once. A model that repeats itself through the nudge has made its
-        choice, and the turn stands as its own — flagged, so the run can be
-        read as what it is.
-        """
-        assert self.episodes is not None
-        entry = self.episodes.repeat_of(action.command)
-        if entry is None:
-            return action
-        note = llm.repeat_nudge(entry.command, entry.count, next(iter(entry.outcomes)))
-        if action.meta.get("all_candidates_inert"):
-            note = llm.exhausted_nudge(action.meta.get("offered") or [action.command], note)
-        again = await self._act(ctx, extra=note)
-        again.meta["nudged"] = note
-        again.meta["nudged_from"] = action.command
-        # Why the re-ask happened belongs with the move it produced.
-        for key in ("all_candidates_inert", "offered", "skipped"):
-            if key in action.meta:
-                again.meta.setdefault(key, action.meta[key])
-        for key in ("input_tokens", "output_tokens"):
-            again.meta[key] = action.meta.get(key, 0) + again.meta.get(key, 0)
-        if self.episodes.repeat_of(again.command) is not None:
-            again.meta["nudge_ignored"] = True
-        return again
-
-    async def _act(self, ctx: TurnContext, extra: str = "") -> AgentAction:
-        record = ""
-        if self.episodes is not None:
-            if not extra:
-                self.episodes.before_move(ctx)
-            record = (
-                self.episodes.render(agenda=self.agenda, vocabulary=self.vocabulary)
-                if self.recall == "episodic" else ""
-            )
-        if self.journal is not None:
-            known = self.journal.render()
-            record = f"{known}\n\n{record}" if record else known
-        prompt = llm.turn_prompt(self.memory, ctx, self.history_turns, record)
-        if extra:
-            prompt += "\n\n" + extra
+        prompt = llm.turn_prompt(self.memory, ctx, self.history_turns)
         crowded = self.context_warning(len(prompt) + len(self.system))
         started = time.perf_counter()
-        schema = llm.MOVE_FIELDS_RANKED if self.candidates else llm.MOVE_FIELDS
+        schema = llm.MOVE_FIELDS
         retried = ""
         try:
             data = await self._chat(prompt, schema, self.max_tokens)
@@ -420,7 +313,7 @@ class OllamaAgent(Agent):
         inp, out = self._count(data, (time.perf_counter() - started) * 1000)
 
         message = data.get("message") or {}
-        command, alternatives, reasoning, structured = self._parse_ranked(message)
+        command, reasoning, structured = self._parse(message)
         thinking = message.get("thinking") or ""
         overran = data.get("done_reason") == "length" and not command
 
@@ -429,11 +322,6 @@ class OllamaAgent(Agent):
             meta["retried_after"] = retried
         if crowded:
             meta["context_warning"] = crowded
-        if self.episodes is not None:
-            # The record exactly as the model saw it this turn: when a player
-            # repeats itself, whether the repeat was on the page is the question.
-            meta["record"] = record
-            meta["record_stats"] = self.episodes.summary()
         if thinking:
             # Kept whole in the trace: a model that talked itself in circles
             # is only diagnosable from what it said.
@@ -468,37 +356,12 @@ class OllamaAgent(Agent):
         })
         if not structured:
             meta["unstructured"] = True
-
-        if self.candidates and self.episodes is not None and command:
-            command = self._first_untried([command, *alternatives], meta)
         if not command:
             meta["error"] = True
 
         return AgentAction(command=command or "look", thought=reasoning, meta=meta)
 
-    def _first_untried(self, ranked: list[str], meta: dict[str, Any]) -> str:
-        """The model's own ranking, minus what the record has watched do nothing.
-
-        If every candidate is one of those, the first stands: the choice was
-        the model's, and the harness has no better idea than it does.
-        """
-        assert self.episodes is not None
-        skipped = []
-        for candidate in ranked:
-            if self.episodes.repeat_of(candidate) is None:
-                if skipped:
-                    meta["skipped"] = skipped
-                    meta["offered"] = ranked
-                return candidate
-            skipped.append(candidate)
-        meta["skipped"] = skipped[:-1]
-        meta["offered"] = ranked
-        meta["all_candidates_inert"] = True
-        return ranked[0]
-
     async def reflect(self, ctx: TurnContext, cause: str) -> str | None:
-        if self.episodes is not None:
-            self.episodes.before_reflection(ctx)
         started = time.perf_counter()
         try:
             # The tight cap only when thinking is known to be off; a model left
@@ -527,12 +390,6 @@ class OllamaAgent(Agent):
             "structured_output": not self.plain,
             "options": self._options(self.max_tokens),
             "history_turns": self.history_turns,
-            "recall": self.recall,
-            "nudge": self.nudge,
-            "candidates": self.candidates,
-            "agenda": self.agenda,
-            "vocabulary": self.vocabulary,
-            "journal": self.journal.summary() if self.journal is not None else None,
             "info_level": self.info_level,
             "system_prompt": self.system,
             "system_fingerprint": prompts.fingerprint(self.info_level),

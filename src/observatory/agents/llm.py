@@ -39,50 +39,25 @@ MOVE_FIELDS: dict[str, Any] = {
 # and the interpreter would only choke on it.
 MAX_COMMAND_CHARS = 120
 
-# The same move, with fallbacks. Asking for a ranked list costs one call, not
-# two, and turns "don't repeat yourself" from an instruction into a choice the
-# harness can act on: it plays the first candidate its record does not already
-# know to be inert here. The model still decides what is worth trying; the
-# harness only skips what it has watched do nothing.
-MOVE_FIELDS_RANKED: dict[str, Any] = {
-    "type": "object",
-    "properties": {
-        "reasoning": MOVE_FIELDS["properties"]["reasoning"],
-        "command": MOVE_FIELDS["properties"]["command"],
-        "alternatives": {
-            "type": "array",
-            "items": {"type": "string"},
-            "description": "Two more lines you would type instead, best first, "
-                           "different from the first and from each other.",
-        },
-    },
-    "required": ["reasoning", "command", "alternatives"],
-    "additionalProperties": False,
-}
+# The transcript window, in exchanges. Thirty is what the September 2026 sweep
+# measured as working — see docs/experiments/2026-09-scaffold-sweep.md, where
+# the arm that replaced this window with a structured record never once entered
+# the house.
+DEFAULT_HISTORY = 30
 
 
-RECALL_MODES = ("transcript", "episodic")
-
-# How much raw transcript each kind of recall sees by default. The episodic
-# player gets the last exchange only: its record already holds everything
-# older, filed rather than replayed.
-DEFAULT_HISTORY = {"transcript": 30, "episodic": 1}
-
-
-def default_history(recall: str) -> int:
-    if recall not in RECALL_MODES:
-        raise ValueError(f"Unknown recall mode: {recall!r} (expected {', '.join(RECALL_MODES)})")
-    return DEFAULT_HISTORY[recall]
-
-
-def turn_prompt(mem: AgentMemory, ctx: TurnContext, history_turns: int, record: str = "") -> str:
+def turn_prompt(mem: AgentMemory, ctx: TurnContext, history_turns: int) -> str:
     """One user turn carrying a windowed transcript.
 
     A rolling window rather than the whole history: past a few dozen turns the
     early transcript stops informing the next move and starts costing tokens.
     A window of zero is the stateless player: the latest output and nothing
-    else, not even the command that produced it. `record` is the episodic
-    player's filed history (see episodic.py), shown ahead of the window.
+    else, not even the command that produced it.
+
+    The window does more work than it appears to. A room description scrolls
+    past once, and everything the player could act on is named in it; thirty
+    turns keeps it in view long enough to be tried. A one-turn window let the
+    same model walk past the only way into the house nine times.
     """
     lines = []
 
@@ -93,9 +68,6 @@ def turn_prompt(mem: AgentMemory, ctx: TurnContext, history_turns: int, record: 
     remembered = mem.render()
     if remembered:
         lines.append(remembered)
-        lines.append("")
-    if record:
-        lines.append(record)
         lines.append("")
 
     if history_turns > 0:
@@ -126,43 +98,6 @@ def reflection_prompt(mem: AgentMemory, ctx: TurnContext) -> str:
     lines.append("")
     lines.append(memory.REFLECT_RESTART if ctx.next_start == "beginning" else memory.REFLECT)
     return "\n".join(lines)
-
-
-def repeat_nudge(command: str, count: int, outcome: str) -> str:
-    """Handed back to a model that just chose a command its own record shows
-    doing nothing here, so it may choose again.
-
-    A scaffold, and labelled as one. It says nothing about the game: it quotes
-    the agent's own record back at it and asks for something else. Whether the
-    model then does something else is the measurement — see the `nudge` option
-    in ollama_agent.py, and the name suffix that keeps a nudged run from being
-    mistaken for a bare one.
-    """
-    seen = outcome if outcome.startswith("heading ") else outcome.strip('"')
-    if count == 1:
-        history = f"You have already typed {command!r} here, and the reply was: {seen}"
-    else:
-        history = (
-            f"You have already typed {command!r} here {count} times, and every time "
-            f"the reply was the same: {seen}"
-        )
-    return f"Wait. {history}\n\nType something you have not tried here."
-
-
-def exhausted_nudge(offered: list[str], note: str) -> str:
-    """When every ranked candidate is one the record has watched do nothing.
-
-    The turn a filter cannot help with: the model is out of ideas and all three
-    of them are the same idea. It is told so, and told that the record lists
-    what is untouched here — which is where the agenda earns its place.
-    """
-    tried = ", ".join(f"{c!r}" for c in offered)
-    return (
-        f"{note}\n\nAll of your choices this turn ({tried}) are ones you have already "
-        f"typed here to no effect. Leave that idea. Your record lists the directions "
-        f"you have not typed here and the words this place's text used that you have "
-        f"not; take one of those."
-    )
 
 
 def clean_command(text: str) -> str:

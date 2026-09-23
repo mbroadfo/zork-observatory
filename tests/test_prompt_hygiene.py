@@ -109,8 +109,17 @@ class TestTheLadderIsActuallyALadder:
     def test_coached_names_goals_beyond_movement(self):
         text = prompts.get("coached").lower()
         assert "movement is not the point" in text
-        for idea in ["examine", "search", "take", "open", "inventory"]:
+        for idea in ["take", "open", "move", "inventory"]:
             assert idea in text
+
+    def test_coached_does_not_ask_for_work_that_looking_satisfies(self):
+        """It used to say "work each new description: every noun is something
+        to examine, search, take or open", and the model complied by looking:
+        158 looks against 9 takes over 350 turns. What it asks for now cannot
+        be done by asking to be told the description again."""
+        text = prompts.get("coached").lower()
+        assert "work each new description" not in text
+        assert "name a noun the description printed" in text
 
     def test_coached_ranks_what_to_do_when_several_things_are_possible(self):
         """qwen3:14b would spend a turn on `look around` with three untried

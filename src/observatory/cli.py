@@ -8,12 +8,11 @@ import sys
 from pathlib import Path
 
 from .agents import (
-    AGENTS, DEFAULT_NUM_CTX, DEFAULT_TEMPERATURE, RECALL_MODES,
-    build_agent, default_history, parse_think,
+    AGENTS, DEFAULT_HISTORY, DEFAULT_NUM_CTX, DEFAULT_TEMPERATURE,
+    build_agent, parse_think,
 )
 from .engine import build_engine, engine_seed
 from .events import Event, EventBus
-from .journal import Journal
 from .notebook import MODES as NOTEBOOK_MODES, Notebook
 from .session import Session, SessionConfig
 from .trace import TraceWriter, read_events, trace_header
@@ -45,36 +44,14 @@ def _add_run_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--no-agent-save", action="store_true",
                    help="withhold SAVE/RESTORE from the agent")
     p.add_argument("--seed", type=int, default=12345)
-    p.add_argument("--recall", default="transcript", choices=list(RECALL_MODES),
-                   help="LLM agents: transcript (a rolling window of raw exchanges) or episodic "
-                        "(every command filed under the heading it was typed at, with its reply "
-                        "and a count — see agents/episodic.py)")
     p.add_argument("--temperature", type=float, default=DEFAULT_TEMPERATURE,
                    help="ollama only: sampling temperature. 0.7 (the default) is a setting for "
                         "prose; 0.2-0.3 wanders less and follows an instruction more closely")
-    p.add_argument("--journal", default="off", choices=list(NOTEBOOK_MODES),
-                   help="ollama only: what stays true of the world across runs — topology, first "
-                        "sight, and what has been seen to do something. Written every turn, "
-                        "kept beside the notebook. off (default), carry, or new")
-    p.add_argument("--agenda", action="store_true",
-                   help="ollama only: add to the record the directions not yet typed here and the "
-                        "words this place's text used that no command here has. The largest "
-                        "scaffold: it reads the description for things to act on")
-    p.add_argument("--vocabulary", action="store_true",
-                   help="ollama only: add to the record the first words the parser has taken and "
-                        "refused, and the words it knows but said were absent")
-    p.add_argument("--candidates", action="store_true",
-                   help="ollama only: ask for a ranked list of commands and play the first the "
-                        "record does not already know to be inert here. One call, not two")
-    p.add_argument("--nudge", action="store_true",
-                   help="ollama only: when the model picks a command its own record shows doing "
-                        "nothing here, quote the record back and ask once for another. A scaffold, "
-                        "recorded as one — the agent's name gains +nudge")
     p.add_argument("--num-ctx", type=int, default=DEFAULT_NUM_CTX,
                    help="ollama only: context window in tokens. Smaller keeps a larger model "
                         "entirely on the GPU; overflow is dropped from the front, silently")
-    p.add_argument("--history-turns", type=int, default=None,
-                   help="raw exchanges shown each turn (default: 30 for transcript, 1 for episodic)")
+    p.add_argument("--history-turns", type=int, default=DEFAULT_HISTORY,
+                   help="exchanges of transcript shown each turn")
     p.add_argument("--trace", default=None, help="write a JSONL trace here")
     p.add_argument("--runs", type=int, default=1,
                    help="play this many runs back to back, each from the first move")
@@ -85,8 +62,6 @@ def _add_run_args(p: argparse.ArgumentParser) -> None:
 
 
 async def _play(args: argparse.Namespace) -> int:
-    if args.history_turns is None:
-        args.history_turns = default_history(args.recall)
     runs = max(1, args.runs)
     mode = args.notebook
     for index in range(1, runs + 1):
@@ -107,19 +82,11 @@ async def _play_once(args: argparse.Namespace, notebook_mode: str, series: dict[
     if script:
         # A replay runs to its end; the budget is for agents that explore.
         args.turns = max(args.turns, len(script) + 20)
-    journal = None
-    if args.journal != "off":
-        journal = Journal.open(
-            Path("traces") / "notebooks", engine.story or engine.name,
-            f"{args.agent}:{args.model or ''}", fresh=args.journal == "new",
-        )
     try:
         agent = build_agent(
             args.agent, commands=script, seed=args.seed, model=args.model, effort=args.effort,
             history_turns=args.history_turns, info_level=args.info_level,
-            think=parse_think(args.think), recall=args.recall, num_ctx=args.num_ctx,
-            nudge=args.nudge, candidates=args.candidates,
-            agenda=args.agenda, vocabulary=args.vocabulary, journal=journal,
+            think=parse_think(args.think), num_ctx=args.num_ctx,
             temperature=args.temperature,
         )
     except ValueError as exc:

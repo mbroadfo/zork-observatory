@@ -515,26 +515,11 @@ function addThought(text, meta) {
     // Ollama truncates an over-long prompt from the front, silently, and the
     // front is the system prompt and the memory.
     if (meta.context_warning) bits.push(`⚠ ${meta.context_warning}`);
-    // A nudged turn is not a bare model's turn; say so where the move is read.
-    if (meta.nudged) bits.push(`↩ nudged off "${meta.nudged_from}"`);
-    if (meta.nudge_ignored) bits.push("↩ nudge ignored — repeated anyway");
-    if (meta.skipped && meta.skipped.length) bits.push(`↩ skipped ${meta.skipped.map((c) => `"${c}"`).join(", ")}`);
-    if (meta.all_candidates_inert) bits.push("↩ every candidate already seen to do nothing here");
     if (meta.cache_read_tokens) bits.push(`${meta.cache_read_tokens} cached`);
     m.textContent = bits.join("  ·  ");
     // The hidden deliberation, on hover; it is in the trace either way.
     if (meta.thinking) m.title = meta.thinking.length > 4000 ? meta.thinking.slice(-4000) : meta.thinking;
     el.appendChild(m);
-  }
-  if (meta && meta.record_stats) {
-    // What the episodic player had in front of it this turn, on hover: when it
-    // repeats itself, whether the repeat was on the page is the question.
-    const r = document.createElement("span");
-    r.className = "meta";
-    const s = meta.record_stats;
-    r.textContent = `record: ${s.headings} headings · ${s.entries} commands · ${s.repeats} repeats`;
-    r.title = meta.record || "(empty)";
-    el.appendChild(r);
   }
   if (!state.showThoughts) el.style.display = "none";
   append(el);
@@ -1224,12 +1209,8 @@ function syncAgentControls() {
   $("think").style.display = local ? "" : "none";
   $("numctx").style.display = local ? "" : "none";
   $("temp").style.display = local ? "" : "none";
-  $("nudge").style.display = local ? "" : "none";
   $("info").style.display = claude || local ? "" : "none";
-  $("recall").style.display = claude || local ? "" : "none";
-  $("scaffold").style.display = local ? "" : "none";
   $("notebook").style.display = claude || local ? "" : "none";
-  $("journal").style.display = local ? "" : "none";
   $("input-row").classList.toggle("on", agent === "human");
   if (local) loadLocalModels();
 }
@@ -1279,16 +1260,10 @@ $("new-run").onclick = async () => {
   resetView();
   const llm = ["claude", "ollama"].includes($("agent").value);
   const body = {
-    recall: llm ? $("recall").value : "transcript",
     num_ctx: parseInt($("numctx").value, 10) || 16384,
     temperature: parseFloat($("temp").value),
-    nudge: $("nudge").value === "1",
-    candidates: $("nudge").value === "2",
-    agenda: $("scaffold").value.includes("agenda"),
-    vocabulary: $("scaffold").value.includes("vocab"),
     runs: parseInt($("runs").value, 10) || 1,
     notebook: llm ? $("notebook").value : "off",
-    journal: $("agent").value === "ollama" ? $("journal").value : "off",
     engine: $("engine").value,
     rom: $("rom").value || null,
     agent: $("agent").value,

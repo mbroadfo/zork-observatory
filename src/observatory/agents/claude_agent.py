@@ -16,7 +16,6 @@ from typing import Any
 
 from . import llm, prompts
 from .base import Agent, AgentAction, TurnContext
-from .episodic import EpisodicMemory
 
 # How much the agent is told is an experimental variable — see prompts.py for
 # the ladder and for why "cold" does not produce a naive player. Every level
@@ -90,24 +89,16 @@ class ClaudeAgent(Agent):
         max_tokens: int = 2000,
         info_level: str = DEFAULT_INFO_LEVEL,
         api_key: str | None = None,
-        recall: str = "transcript",
     ) -> None:
         import anthropic
 
-        llm.default_history(recall)   # validates
         self.model = model
         self.effort = effort
         self.history_turns = history_turns
         self.max_tokens = max_tokens
         self.info_level = info_level
-        self.recall = recall
-        self.episodes = EpisodicMemory() if recall == "episodic" else None
         self.system = prompts.get(info_level)
-        self.name = (
-            f"claude:{model}"
-            + ("" if info_level == DEFAULT_INFO_LEVEL else f"/{info_level}")
-            + ("" if recall == "transcript" else f"+{recall}")
-        )
+        self.name = f"claude:{model}" + ("" if info_level == DEFAULT_INFO_LEVEL else f"/{info_level}")
         self._client = anthropic.AsyncAnthropic(api_key=api_key) if api_key else anthropic.AsyncAnthropic()
         self._totals = {
             "input_tokens": 0,
@@ -120,26 +111,14 @@ class ClaudeAgent(Agent):
 
     # --- prompt ----------------------------------------------------------
 
-    def _messages(self, ctx: TurnContext, record: str = "") -> list[dict[str, Any]]:
+    def _messages(self, ctx: TurnContext) -> list[dict[str, Any]]:
         """The windowed transcript; `history_turns` is the single biggest cost
         lever here. The wording lives in llm.py, shared with every model."""
-        return [{"role": "user", "content": llm.turn_prompt(self.memory, ctx, self.history_turns, record)}]
+        return [{"role": "user", "content": llm.turn_prompt(self.memory, ctx, self.history_turns)}]
 
     # --- play ------------------------------------------------------------
 
     async def act(self, ctx: TurnContext) -> AgentAction:
-        record = ""
-        if self.episodes is not None:
-            self.episodes.before_move(ctx)
-            record = self.episodes.render()
-        action = await self._act(ctx, record)
-        if self.episodes is not None:
-            action.meta["record"] = record
-            action.meta["record_stats"] = self.episodes.summary()
-            self.episodes.after_move(action.command)
-        return action
-
-    async def _act(self, ctx: TurnContext, record: str) -> AgentAction:
         import anthropic
 
         started = time.perf_counter()
@@ -155,7 +134,7 @@ class ClaudeAgent(Agent):
                     }
                 ],
                 output_config=output_config(self.model, self.effort, MOVE_SCHEMA),
-                messages=self._messages(ctx, record),
+                messages=self._messages(ctx),
             )
         except anthropic.APIStatusError as exc:
             return AgentAction(
@@ -212,8 +191,6 @@ class ClaudeAgent(Agent):
         """
         import anthropic
 
-        if self.episodes is not None:
-            self.episodes.before_reflection(ctx)
         try:
             response = await self._client.messages.create(
                 model=self.model,
@@ -244,7 +221,6 @@ class ClaudeAgent(Agent):
             "model": self.model,
             "effort": self.effort if takes_effort(self.model) else None,
             "history_turns": self.history_turns,
-            "recall": getattr(self, "recall", "transcript"),
             "max_tokens": self.max_tokens,
             "info_level": self.info_level,
             "system_prompt": self.system,

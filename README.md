@@ -135,58 +135,30 @@ inference a player needed is a measurement in its own right.
 To use an Ollama installed on the host instead of the container, set
 `OLLAMA_HOST=http://host.docker.internal:11434` before `docker compose up`.
 
-### Transcript recall versus an episodic record
+### What the agent is shown, and what was tried instead
 
-A bare 8B model walks the same forest paths again and again and types `north`
-at the same wall eleven times. It does have the transcript, but reading back
-through eighty exchanges before every move is exactly what a small model does
-badly. `--recall` changes the shape of the past it is shown and nothing else:
+Every model player sees the same thing: the system prompt for its rung, any
+lessons it has kept, and a rolling window of the last thirty exchanges
+(`--history-turns`). The window is assembled in one place, `agents/llm.py`, so
+a difference between two models is a difference between models.
 
-```bash
-observatory play ... --agent ollama --model qwen3:8b --recall transcript   # 30 raw exchanges (the baseline)
-observatory play ... --agent ollama --model qwen3:8b --recall episodic     # a filed record + the last exchange
-```
+That window is doing more work than it looks like. A room description scrolls
+past once and names everything you could act on; thirty turns keeps it in view
+long enough to be tried.
 
-The episodic record files every command under the heading the text was
-showing when it was typed, along with the reply it got and how many times it
-was typed there:
+In September 2026 a twelve-arm sweep tested the alternative — a structured
+record of what had been typed and what came back, plus scaffolds built on it
+(untried directions here, the parser's vocabulary, a nudge when the model
+repeated itself, a ranked-candidate filter, a journal of the world's shape
+carried between runs). Every one of them made the player worse, and the record
+worst of all: with it, the model never once entered the house in 350 turns.
 
-```text
-Latest reply to your inventory command (12 commands ago): "You are carrying: A pile of leaves"
-
-Under the current heading, Clearing, shown 26 times:
-  > take grating ×20 (last just now) → "A valiant attempt." ×5 (latest) · "What a concept!" ×5 · ...
-  > n ×2 (last 30 commands ago) → "The forest becomes impenetrable to the north."
-  > w ×6 (last 8 commands ago) → heading Forest ×5 (latest) · heading Behind House ×1
-Under other headings, most recent first:
-  Forest Path, shown 28 times: > n ×22 → heading Clearing; > w → heading Forest; ...
-```
-
-Every distinct reply is listed with its count. An earlier version showed only
-the latest reply and a "replies varied" flag, which turned twenty refusals of
-`take grating` (Zork rotates its refusal quips) into something that looked
-like an action that might yet work. The inventory line appears only after the
-player has typed an inventory command itself, and it quotes the game's reply.
-Nothing the model says ever enters the record. Its reasoning is shown in the
-observatory but never fed back to it, so a false belief in a thought such as
-"I'm carrying the grating" is re-derived each turn from a record that says
-otherwise.
-
-It is built only from text the player saw (`agents/episodic.py`), so it is the
-player's memory and not the observatory's map. Places are keyed by the printed
-heading, never by the engine's room id, so Zork's five rooms called "Forest"
-are as ambiguous here as they are on screen. Replies are stored verbatim and
-never labelled "blocked" or "dead end", because whether four refusals are
-enough is the player's call. `n` and `north` are kept apart, since learning
-that they mean the same thing is a discovery the ledger measures.
-
-The comparison this sets up: the same model, prompt, seed and game, with only
-the recall changed. If the episodic player stops repeating itself, the
-limitation was the memory architecture, not the model's reasoning. Its
-agent name carries a `+episodic` suffix, so it keeps its own notebook. Each
-turn's record goes into the trace, and in the browser you can hover the
-`record:` line under a thought to see it, so a repeated command can be checked
-against what the model had in front of it.
+All of it was removed. The reasoning, the numbers and the mechanism are in
+[docs/experiments/2026-09-scaffold-sweep.md](docs/experiments/2026-09-scaffold-sweep.md),
+and the code is recoverable at the tag `scaffolds-2026-09`. The short version:
+a structured memory that **replaces** the transcript hides the descriptions
+that tell a player what is in front of them. If it is worth trying again, it
+belongs alongside the window, not instead of it.
 
 ## How it fits together
 
@@ -445,9 +417,8 @@ observatory play ... --agent ollama --model qwen3:8b --runs 5 --notebook new
   future self who "will start again from the very beginning". The question is
   the same whatever ended the run. Death notes from within a run go into the
   notebook too.
-- The notebook is keyed by the full player name (model, information level,
-  recall), so notes written under a coached prompt never reach an uncoached
-  player.
+- The notebook is keyed by the full player name (model and information level),
+  so notes written under a coached prompt never reach an uncoached player.
 - It records every run's result, so it reads as a lineage: what each run
   believed and how far it got.
 
@@ -486,7 +457,7 @@ src/observatory/
   engine/       backends: jericho (real games) · mock (tests, no ROM)
   world/        map graph built from observed transitions · object-tree diffing
   agents/       random · scripted · human · claude · ollama · llm.py (what every model is shown)
-                · memory.py (lessons) · episodic.py (the filed record)
+                · memory.py (the lessons an agent keeps)
   session.py    the turn loop and the checkpoint stack
   notebook.py   what crosses from one run to the next
   events.py     the event bus
@@ -496,6 +467,9 @@ src/observatory/
 tools/
   build_atlas.py  scan → web image, plus a calibration overlay
   trace_paths.py  exit table + scan → the inked passage between each pair of rooms
+  sweep.sh        one configuration at a time, because there is one GPU
+  summarize_sweep.py · sweep_status.py   the sweep read back, finished or live
+docs/experiments/  what was measured, and what was removed because of it
 ```
 
 ## Roadmap

@@ -1,6 +1,6 @@
 from . import prompts
 from .base import Agent, AgentAction, TurnContext
-from .llm import RECALL_MODES, default_history
+from .llm import DEFAULT_HISTORY
 
 # Kept here so the CLI and server can name the defaults without importing the
 # Ollama agent (which they only import when one is actually built).
@@ -22,11 +22,10 @@ __all__ = [
     "MOCK_WALKTHROUGH",
     "build_agent",
     "parse_think",
-    "default_history",
     "AGENTS",
+    "DEFAULT_HISTORY",
     "DEFAULT_NUM_CTX",
     "DEFAULT_TEMPERATURE",
-    "RECALL_MODES",
 ]
 
 
@@ -54,10 +53,9 @@ def build_agent(kind: str, **kwargs) -> Agent:
         return ScriptedAgent(MOCK_WALKTHROUGH, source="mock script")
     if kind == "human":
         return HumanAgent()
-    recall = kwargs.get("recall") or "transcript"
     history = kwargs.get("history_turns")
     if history is None:
-        history = default_history(recall)
+        history = DEFAULT_HISTORY
     if kind == "claude":
         from .claude_agent import ClaudeAgent
 
@@ -66,7 +64,6 @@ def build_agent(kind: str, **kwargs) -> Agent:
             effort=kwargs.get("effort", "medium"),
             history_turns=history,
             info_level=kwargs.get("info_level", "parser"),
-            recall=recall,
         )
     if kind == "ollama":
         from .ollama_agent import OllamaAgent
@@ -77,13 +74,7 @@ def build_agent(kind: str, **kwargs) -> Agent:
             info_level=kwargs.get("info_level", "parser"),
             think=kwargs.get("think"),
             seed=kwargs.get("seed"),
-            recall=recall,
             num_ctx=kwargs.get("num_ctx") or DEFAULT_NUM_CTX,
-            nudge=bool(kwargs.get("nudge")),
-            candidates=bool(kwargs.get("candidates")),
-            agenda=bool(kwargs.get("agenda")),
-            vocabulary=bool(kwargs.get("vocabulary")),
-            journal=kwargs.get("journal"),
             temperature=kwargs.get("temperature", DEFAULT_TEMPERATURE),
         )
     raise ValueError(f"Unknown agent: {kind!r} (expected {', '.join(AGENTS)})")

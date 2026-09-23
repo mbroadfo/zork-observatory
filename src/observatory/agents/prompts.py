@@ -108,8 +108,8 @@ the same place without having changed something in between is never the best \
 move available.
 - Points come from acting on the world: taking what is valuable, putting things \
 where they belong, opening what is shut, solving what blocks you.
-- Work each new description: every noun printed is something to examine, \
-search, take or open. A room you only walked through is unexplored.
+- Name a noun the description printed in your next command: take it, open it, \
+move it. A room you only walked through is unexplored.
 - Use the words the game has printed. It knows a small, fixed vocabulary, so a \
 noun you thought of yourself is usually not in it, and hunting for a thing \
 nothing has mentioned spends turns on a word the parser cannot even read.
@@ -120,8 +120,7 @@ Hazards.
 - Darkness is lethal: carry a light source and make it work before going \
 anywhere dark. Not every one is lit with a flame — some are switched on — so \
 if lighting it fails, try turning it on.
-- Open everything you can open; containers hold useful things.
-- Valuables usually need to be deposited somewhere specific to score."""
+- Open everything you can open; containers hold useful things."""
 
 
 LEVELS: dict[str, str] = {
