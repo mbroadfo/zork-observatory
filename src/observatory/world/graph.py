@@ -49,6 +49,14 @@ class Room:
     dark: bool = False
     deaths: int = 0
     objects_seen: list[str] = field(default_factory=list)
+    # The last turn the player stood here. `first_seen_turn` says when the room
+    # entered the map; this says whether the agent ever went back. The gap
+    # between them and the current turn is what frontier.py measures staleness
+    # with, and a room is only abandoned if you know when it was last seen.
+    last_seen_turn: int = 0
+
+    def __post_init__(self) -> None:
+        self.last_seen_turn = self.last_seen_turn or self.first_seen_turn
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -116,6 +124,7 @@ class MapGraph:
             room = self.rooms[room_id]
             room.visits += 1
             room.dark = room.dark or dark
+            room.last_seen_turn = turn
             if name and name != "Unknown":
                 room.name = name
         if not self.path or self.path[-1] != room_id:

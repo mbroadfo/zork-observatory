@@ -192,6 +192,35 @@ the player ended up in yields an edge; a movement command that *didn't* move you
 yields a blocked exit, drawn as a stub with the refusal message attached. It
 works on any game the engine can load.
 
+### The shape of the map, not just its size
+
+Room and edge counts say how much was found and nothing about how. Two runs can
+find twelve rooms, one by pushing outward and one by pacing the same corridor,
+and the count calls them equal. `world/frontier.py` measures the difference,
+still without consulting the game: how deep the map reaches from the starting
+room, how many disconnected fragments it is in, what share of room-to-room
+moves landed somewhere already known, how many directions were tried per room,
+how many walls were hit once and never retested — and how long the run went on
+after it last found anything new.
+
+That last one is the sharpest. In the September 2026 sweep the arm that scored
+zero found its twelfth room on turn 70 and its thirteenth never, so 296 of its
+350 turns were spent after the map had stopped growing. Nothing in the score
+said so until the end.
+
+These travel on every `map.update` and on `session.ended`, and show in the map
+pane's header while a run is going. For traces recorded before they existed,
+`tools/structure.py` rebuilds the map from the events and computes them after
+the fact:
+
+```bash
+python tools/structure.py                                    # every arm, final shape
+python tools/structure.py --timeline traces/sweep/bare.jsonl # one arm over its length
+```
+
+The rebuild is exact — replaying a trace reproduces the map the live run held,
+across deaths and rollbacks — and a test holds it to that.
+
 ### The chart: a period map under fog
 
 For Zork I there is a second view: the 1982 Zork Users Group map (D. Ardito
@@ -455,7 +484,8 @@ observatory replay traces/run.jsonl     # terminal
 ```text
 src/observatory/
   engine/       backends: jericho (real games) · mock (tests, no ROM)
-  world/        map graph built from observed transitions · object-tree diffing
+  world/        map graph built from observed transitions · frontier.py (its shape)
+                · object-tree diffing
   agents/       random · scripted · human · claude · ollama · llm.py (what every model is shown)
                 · memory.py (the lessons an agent keeps)
   session.py    the turn loop and the checkpoint stack
@@ -469,6 +499,7 @@ tools/
   trace_paths.py  exit table + scan → the inked passage between each pair of rooms
   sweep.sh        one configuration at a time, because there is one GPU
   summarize_sweep.py · sweep_status.py   the sweep read back, finished or live
+  structure.py    the shape of the map a trace drew, rebuilt from its events
 docs/experiments/  what was measured, and what was removed because of it
 ```
 

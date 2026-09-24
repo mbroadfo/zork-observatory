@@ -119,6 +119,53 @@ fixed seed and temperature.
   that has none and spent twenty turns hunting a lamp — memory steering a run
   wrongly, recorded in the agent's own words.
 
+## Postscript: the same traces, read structurally
+
+*Added 24 September 2026, after `world/frontier.py` was written. Nothing was
+re-run; these are the sweep's own traces measured with something the sweep did
+not have. `python tools/structure.py`.*
+
+```text
+arm                turns score rooms radius frag reach revisit dirs/rm once walls1  dead
+episodic             350     0    12      8    1     8     91%    3.58    4      6   296
+bare                 350    40    27      7    3     4     79%    2.48   10     11   101
+agenda               350    10    17      7    1    16     76%    6.06    1     63    86
+coached              350    10    17      7    1    16     86%     3.0    1     10    27
+floor                350     0    15      6    1    15     81%    7.93    0     38    48
+nudge                350    10    11      5    1     8     67%    1.91    5      2   105
+temp03               350    15    15      4    1    15     81%    7.87    2     65   126
+candidates           350    10    14      4    1    14     84%    3.43    2     11   136
+coached-episodic     350    10     7      4    1     1     40%    1.43    4      1   327
+cold-agenda          350    10    10      3    2     2     53%     2.4    3      6   267
+```
+
+Three things fall out, and the first one corrects the write-up above.
+
+**The episodic arm was not a slow explorer.** It has the *deepest* map in the
+sweep — radius 8, further from the front door than `bare` ever got — and it got
+there fast. Sampled every 35 turns, it reached twelve rooms and radius 8 by
+turn 70 and then did not find another room for 280 turns while its revisit
+ratio climbed 62% → 91%. The failure was not sluggishness. It explored, and
+then it locked, and the run was decidedly over at turn 105 in a way the score
+(zero, throughout) could not distinguish from bad luck.
+
+**`bare` won by breadth, not by depth.** Its radius plateaued at 7 by turn 140,
+but its room count kept climbing to turn 280 — it was filling in the map
+sideways while the others circled. Its fragment count going 1 → 2 → 3 around
+turn 210 is the one-way descent underground, which is also where its 40 points
+came from.
+
+**`dead` — turns elapsed since the last new room — is the measure the sweep
+should have been stopped on.** Nine hours of GPU bought roughly two thousand
+turns that came after the map had stopped growing. Wiring it into the live event
+stream means the next sweep can halt an arm that has been dead for a hundred
+turns instead of paying for the rest of it.
+
+One honest caution about `dirs/rm`: the random floor scores 7.93 on it, the
+highest in the table, because trying every direction everywhere is exactly what
+random does. High is not good. It measures thoroughness, and thoroughness
+without direction is what the floor is.
+
 ## What this does not establish
 
 One run per arm. Zork's thief and combat are random, and a single 350-turn run

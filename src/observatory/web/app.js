@@ -63,6 +63,7 @@ const state = {
   rooms: new Map(),        // id -> {id, name, dark, deaths, visits, x, y, level, placed}
   edges: new Map(),        // key -> {src, dst, direction, reciprocal}
   blocked: new Map(),      // key -> {src, direction, message}
+  structure: null,         // the map's shape, not its size — see world/frontier.py
   checkpoints: new Map(),  // id -> {id, label, turn, score, auto}
   discoveries: new Map(),  // key -> {key, label, reveals, turn, evidence}
   discoveriesSeen: new Set(),
@@ -333,8 +334,16 @@ function renderMap() {
   cy.$(".room").removeClass("current");
   if (state.current) cy.$id(state.current).addClass("current");
   applyBlockedVisibility();
+  // Size, then shape. Room count alone cannot tell a run that pushed outward
+  // from one that paced a corridor, and that difference is the whole reason to
+  // watch a run rather than read its final score.
+  const s = state.structure;
   $("m-count").textContent =
-    `${state.rooms.size} rooms · ${state.edges.size} edges · ${state.blocked.size} walls`;
+    `${state.rooms.size} rooms · ${state.edges.size} edges · ${state.blocked.size} walls` +
+    (s
+      ? ` · ${s.radius} deep · ${Math.round(s.revisit_ratio * 100)}% revisits` +
+        (s.since_new_room > 0 ? ` · nothing new for ${s.since_new_room}` : "")
+      : "");
 }
 
 function applyBlockedVisibility() {
@@ -1008,6 +1017,7 @@ function handle(event) {
         }
       }
       if (p.new_blocked) state.blocked.set(p.new_blocked.key, p.new_blocked);
+      if (p.structure) state.structure = p.structure;
       state.current = p.current_room;
       renderMap();
       maybeFit();
@@ -1020,6 +1030,11 @@ function handle(event) {
         `■ ${p.reason} — ${p.final_score}/${p.max_score} in ${p.turns} turns · ` +
           `${p.deaths || 0} death(s) · ` +
           `${p.map.rooms} rooms, ${p.map.edges} edges, ${p.map.blocked} blocked` +
+          (p.structure
+            ? ` · ${p.structure.radius} deep, ` +
+              `${Math.round(p.structure.revisit_ratio * 100)}% revisits, ` +
+              `last new room ${p.structure.since_new_room} turns before the end`
+            : "") +
           (u.calls ? ` · $${u.cost_usd} over ${u.calls} calls, ` +
             `${fmtTokens(u.input_tokens || 0)} in / ${fmtTokens(u.output_tokens || 0)} out` : "")
       );

@@ -3,7 +3,8 @@
 #
 # Every arm changes exactly one thing from the arm above it, so a difference
 # between two rows has one candidate explanation. The traces land in
-# traces/sweep/ and tools/summarize_sweep.py reads them back.
+# traces/sweep/; tools/summarize_sweep.py reads them back as scores and turn
+# quality, tools/structure.py as the shape of the map each arm drew.
 #
 #   bash tools/sweep.sh            # the whole ladder
 #   bash tools/sweep.sh bare coached   # named arms only
@@ -25,21 +26,31 @@ COMMON="--engine jericho --rom roms/zork1.z5 --turns $TURNS --lives $LIVES --see
 # Thinking off, deliberately. Left to its own default qwen3:14b spends 1.5k-7k
 # characters of it per turn and a turn takes 30s instead of 3s; the same ladder
 # with thinking on is its own sweep, not a row in this one.
-OLLAMA="--agent ollama --model $MODEL --num-ctx $CTX --think off"
+OLLAMA="--agent ollama --model $MODEL --num-ctx $CTX"
+# Thinking off everywhere except the arm that exists to price it.
+OFF="$OLLAMA --think off"
 
 # name|arguments
+#
+# The scaffold arms this list used to carry are gone with the code that served
+# them: --recall, --candidates, --agenda, --vocabulary, --nudge and --journal
+# were all measured in September 2026 and all removed. The traces are still in
+# traces/sweep/ and the arms that produced them are named in
+# docs/experiments/2026-09-scaffold-sweep.md; the tag scaffolds-2026-09 has the
+# flags themselves, should anyone want to rerun one against a different model.
+#
+# What is left is the ladder that survived: the information levels, the
+# transcript window, and the two dials that moved anything.
 ARMS=(
   "floor|--agent random"
-  "bare|$OLLAMA --info-level parser"
-  "episodic|$OLLAMA --info-level parser --recall episodic"
-  "coached|$OLLAMA --info-level coached"
-  "coached-episodic|$OLLAMA --info-level coached --recall episodic"
-  "candidates|$OLLAMA --info-level coached --recall episodic --candidates"
-  "nudge|$OLLAMA --info-level coached --recall episodic --nudge"
-  "agenda|$OLLAMA --info-level coached --recall episodic --candidates --agenda --vocabulary"
-  "cold-agenda|$OLLAMA --info-level cold --recall episodic --candidates --agenda --vocabulary"
-  "temp03|$OLLAMA --info-level coached --recall episodic --candidates --agenda --vocabulary --temperature 0.3"
-  "journal|$OLLAMA --info-level coached --recall episodic --candidates --agenda --vocabulary --temperature 0.3 --journal new --runs 2"
+  "cold|$OFF --info-level cold"
+  "game|$OFF --info-level game"
+  "bare|$OFF --info-level parser"
+  "coached|$OFF --info-level coached"
+  "window10|$OFF --info-level parser --history-turns 10"
+  "window60|$OFF --info-level parser --history-turns 60"
+  "temp03|$OFF --info-level parser --temperature 0.3"
+  "think|$OLLAMA --info-level parser --think on"
 )
 
 mkdir -p "$OUT"

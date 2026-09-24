@@ -25,6 +25,7 @@ from .notebook import Notebook
 from .trace import TraceWriter
 from .world.coverage import Coverage
 from .world.discovery import DiscoveryLedger, Turn as DiscoveryTurn
+from .world.frontier import structure as map_structure
 from .world.graph import MapGraph
 from .world.outcomes import OutcomeTally
 from .world.vocabulary import Vocabulary
@@ -267,6 +268,11 @@ class Session:
                 "map.update",
                 current_room=room_id,
                 stats=self.map.stats(),
+                # How the map is shaped, not just how big it is. Emitted only
+                # when the map changed, which is the only time most of it can
+                # change; staleness drifts between those points, and the
+                # post-hoc timeline in tools/structure.py is where that is read.
+                structure=map_structure(self.map, self.turn, room_id),
                 **{k: v for k, v in delta.items() if v},
             )
 
@@ -568,6 +574,7 @@ class Session:
             final_score=state.score if state else 0,
             max_score=state.max_score if state else 0,
             map=self.map.stats(),
+            structure=map_structure(self.map, self.turn, self._prev_room_id),
             discoveries=self.ledger.summary(),
             quality=self.outcomes.summary(),
             coverage=self.coverage.summary(),
@@ -660,6 +667,7 @@ class Session:
             "location": state.location_name if state else "",
             "inventory": state.inventory if state else [],
             "map": self.map.stats(),
+            "structure": map_structure(self.map, self.turn, self._prev_room_id),
             "discoveries": self.ledger.manifest(),
             "quality": self.outcomes.summary(),
             "coverage": self.coverage.summary(),
