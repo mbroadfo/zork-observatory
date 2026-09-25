@@ -137,11 +137,20 @@ if lighting it fails, try turning it on.
 #   is the measurement; telling it the answer would erase it.
 #
 # Both are held to the hygiene rules in tests/test_prompt_hygiene.py.
+# Deliberately silent about which entries survive.
+#
+# The harness keeps only the ones the turn bore out, and saying so would be
+# the coaching in JOURNAL_DISCIPLINE smuggled into every rung — "write about
+# things that change" is a tactic, and an uncoached player working out for
+# itself what is worth writing is the measurement. It is not hidden, either:
+# the journal is rendered back every turn, so a player that notices its
+# entries did not survive has discovered something, which is the whole shape
+# of this instrument. Hence "may be kept" rather than a promise.
 JOURNAL_INTERFACE = """
-You keep a journal. Whatever you put in the `journal` field of your reply is \
-written down permanently: it survives everything else you can currently see, \
-and you will be shown it again later. Leave the field out on turns when there \
-is nothing you want to keep."""
+You keep a journal. Anything you put in the `journal` field of your reply may \
+be kept: it outlasts everything else you can currently see, and you will be \
+shown what was kept. Leave the field out on turns when there is nothing you \
+want to keep."""
 
 JOURNAL_DISCIPLINE = """
 Write in the journal when something you did changed the world — something \

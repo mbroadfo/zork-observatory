@@ -303,7 +303,9 @@ class Session:
         # corrected or withheld — it wrote what it wrote — but the difference
         # is the measurement, so it is stored rather than inferred later.
         if self._pending_journal and self.agent.journal is not None:
-            entry = self.agent.journal.add(
+            journal = self.agent.journal
+            before = len(journal.rejected)
+            entry = journal.add(
                 self._pending_journal,
                 turn=self.turn,
                 # Where the command was given, not where it landed: an entry
@@ -316,10 +318,15 @@ class Session:
             if entry is not None:
                 if self.notebook:
                     self.notebook.write(entry)
+                self._emit("journal.written", **entry.to_dict(), summary=journal.summary())
+            elif len(journal.rejected) > before:
+                # Refused, and said so. A claim the world did not bear out is
+                # not kept, but it is not swallowed either: it is the half of
+                # the record that says when the player stopped being reliable.
                 self._emit(
-                    "journal.written",
-                    **entry.to_dict(),
-                    summary=self.agent.journal.summary(),
+                    "journal.rejected",
+                    **journal.rejected[-1].to_dict(),
+                    summary=journal.summary(),
                 )
         self._pending_journal = ""
 

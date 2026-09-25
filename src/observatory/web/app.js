@@ -68,7 +68,8 @@ const state = {
   discoveries: new Map(),  // key -> {key, label, reveals, turn, evidence}
   discoveriesSeen: new Set(),
   memory: [],              // lessons the agent kept across rollbacks
-  journal: null,           // what it wrote down as it went; null = no journal
+  journal: null,           // entries the world bore out; null = no journal
+  journalAttempted: 0,     // including the ones it refused, which is the point
   occupied: new Set(),     // "col,row" lattice cells, so rooms never stack
   showBlocked: false,      // walls are clutter by default; they outnumber edges 2:1
   current: null,
@@ -873,12 +874,17 @@ function renderJournal(entries) {
   }
   section.style.display = "";
   const el = $("s-journal");
-  const agreed = entries.filter((e) => e.corroborated).length;
-  $("j-count").textContent = entries.length
-    ? `${agreed}/${entries.length} corroborated`
+  // Kept against offered, not kept against kept: every surviving entry is
+  // corroborated by construction, so a rate over survivors would always read
+  // 100% however much fiction the model wrote.
+  const attempted = state.journalAttempted || entries.length;
+  $("j-count").textContent = attempted
+    ? `${entries.length}/${attempted} kept`
     : "";
   if (!entries.length) {
-    el.innerHTML = '<li class="empty">nothing written down yet</li>';
+    el.innerHTML = attempted
+      ? `<li class="empty">${attempted} claim(s) written, none the world bore out</li>`
+      : '<li class="empty">nothing written down yet</li>';
     return;
   }
   el.innerHTML = entries
@@ -889,10 +895,9 @@ function renderJournal(entries) {
         e.room || null,
         e.command ? `“${e.command}”` : null,
       ].filter(Boolean).join(" · ");
-      const mark = e.corroborated
-        ? '<span class="ok" title="the world really did change on this turn">✓</span> '
-        : `<span class="warn" title="the engine classified this turn as ${escapeHtml(e.outcome || "unclassified")} — nothing changed">✗</span> `;
-      return `<li><span class="where">${escapeHtml(where)}</span>${mark}${escapeHtml(e.text)}</li>`;
+      return `<li><span class="where">${escapeHtml(where)}</span>` +
+        '<span class="ok" title="the world really did change on this turn">✓</span> ' +
+        `${escapeHtml(e.text)}</li>`;
     })
     .join("");
 }
@@ -1033,12 +1038,20 @@ function handle(event) {
     case "journal.written":
       if (!state.journal) state.journal = [];
       state.journal.push(p);
+      state.journalAttempted = (p.summary || {}).attempted || state.journal.length;
       renderJournal(state.journal);
+      note(`✎ journal: ${p.text}`);
+      break;
+
+    case "journal.rejected":
+      // Refused, and shown. The entry is not kept and the agent never reads
+      // it back, but a claim made on a turn where nothing happened is the
+      // most legible sign a run has stopped getting anywhere.
+      state.journalAttempted = (p.summary || {}).attempted || 0;
+      renderJournal(state.journal || []);
       note(
-        (p.corroborated ? "✎ " : "✎ ✗ ") +
-          `journal: ${p.text}` +
-          (p.corroborated ? "" : ` — but the turn was ${p.outcome}, nothing changed`),
-        !p.corroborated
+        `✎ ✗ not kept — “${p.text}” but the turn was ${p.outcome}, nothing changed`,
+        true
       );
       break;
 
@@ -1137,6 +1150,7 @@ function resetView() {
   state.discoveriesSeen.clear();
   state.memory = [];
   state.journal = null;
+  state.journalAttempted = 0;
   state.occupied.clear();
   renderCheckpoints([]);
   renderDiscoveries([]);
@@ -1242,6 +1256,7 @@ function applySummary(s) {
   if ((s.memory || []).length >= state.memory.length) state.memory = s.memory || [];
   renderMemory(state.memory);
   if (s.journal) state.journal = s.journal;
+  if (s.journal_summary) state.journalAttempted = s.journal_summary.attempted || 0;
   renderJournal(state.journal);
   renderQuality(s.quality);
   renderCoverage(s.coverage);

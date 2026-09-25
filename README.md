@@ -182,25 +182,44 @@ write down what the mailbox did at turn 2, because it can no longer see turn 2.
 What comes back is a theory about whatever happened last. A journal is written
 while the thing it is about is still on screen.
 
-**Every entry carries the engine's verdict on the turn it was written on.**
-`world/outcomes.py` already classifies each turn, and `progress` means the
-world really did change — a different state hash, room, score or inventory. So
-an entry is corroborated or it is not, and the ratio is a measurement rather
-than a reading. From the first fourteen turns of a qwen3:14b run:
+**Only entries the world bore out are kept.** The observatory has the
+Z-machine's own state on both sides of every command, and `world/outcomes.py`
+already classifies each turn: `progress` means the state hash, room, score or
+inventory actually differs from before. An entry offered on a `progress` turn
+is kept; one offered on an `inert`, `futile` or `blocked` turn is counted,
+traced and thrown away. The agent still chooses what to write and the words
+stay its own — the world decides which of them last.
+
+That is not how it was built. The first version kept everything, and the run
+that measured it is the argument for the change. Over ninety-five turns a
+qwen3:14b run wrote twenty-two entries, eight of them true, and the false ones
+were not scattered:
 
 ```text
-✓ turn  1  progress  open mailbox           Opened the mailbox.
-✓ turn  8  progress  take pile of leaves    took pile of leaves in Clearing
-✗ turn  9  inert     move grating           Moved the grating in Clearing.
-✗ turn 12  inert     open grating           Attempted to open the grating.
-✗ turn 14  inert     unlock grating …       Attempted to unlock the grating …
-                                            → 2/5 corroborated
+grating loop   turns  1–70    2/10 corroborated
+break-in       turns 71–82    6/6
+door loop      turns 85–93    0/5
 ```
 
-The grating did not move. Nothing corrects the entry and nothing hides it — the
-agent wrote what it wrote, and that is the datum — but the gap between what
-changed and what was recorded is visible on turn 9 instead of four runs later,
-which is how long the notebook took to make the same kind of mistake legible.
+Six straight true entries while it opened the window, entered the house, took
+the lamp and lit it. Then five straight false ones while it pushed at a door
+that does not open — including *"Moved east from Attic to Living Room"* on a
+turn the exit was refused. Earlier it wrote *"took the grating"* on a turn the
+engine classified `futile`, then spent forty turns trying to take the grating
+it had just recorded taking.
+
+**A model writes its most confident fiction exactly when it is stuck**, and an
+unfiltered journal feeds that straight back to it as established fact. So the
+rate reported is of everything offered, never of what survived — filtering must
+not be allowed to flatter itself — and it doubles as a live stuck-detector,
+sitting near 100% while a run is getting somewhere and collapsing the moment it
+is not.
+
+One limitation, stated rather than buried: a turn that only reveals
+information — reading a leaflet, examining a thing — changes no state, so it is
+classified `inert` and refused, however worth remembering it was.
+`Journal(corroborated_only=False)` keeps the unfiltered behaviour for the arm
+that measures it.
 
 It is off by default, because a player that keeps no journal is the control arm
 for one that does, and that is the arm the sweep actually measured. The prompt
