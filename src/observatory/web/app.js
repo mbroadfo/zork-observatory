@@ -68,6 +68,7 @@ const state = {
   discoveries: new Map(),  // key -> {key, label, reveals, turn, evidence}
   discoveriesSeen: new Set(),
   memory: [],              // lessons the agent kept across rollbacks
+  journal: null,           // what it wrote down as it went; null = no journal
   occupied: new Set(),     // "col,row" lattice cells, so rooms never stack
   showBlocked: false,      // walls are clutter by default; they outnumber edges 2:1
   current: null,
@@ -860,6 +861,42 @@ function renderMemory(lessons) {
     .join("");
 }
 
+// What the agent chose to write down, marked with whether the engine agreed.
+// An entry written on a turn that changed nothing is not corrected or hidden —
+// it wrote what it wrote — but it is marked, because the gap between what
+// happened and what it recorded is the thing worth watching.
+function renderJournal(entries) {
+  const section = $("journal-section");
+  if (!entries) {
+    section.style.display = "none";
+    return;
+  }
+  section.style.display = "";
+  const el = $("s-journal");
+  const agreed = entries.filter((e) => e.corroborated).length;
+  $("j-count").textContent = entries.length
+    ? `${agreed}/${entries.length} corroborated`
+    : "";
+  if (!entries.length) {
+    el.innerHTML = '<li class="empty">nothing written down yet</li>';
+    return;
+  }
+  el.innerHTML = entries
+    .map((e) => {
+      const where = [
+        e.run ? `run ${e.run}` : null,
+        `turn ${e.turn}`,
+        e.room || null,
+        e.command ? `“${e.command}”` : null,
+      ].filter(Boolean).join(" · ");
+      const mark = e.corroborated
+        ? '<span class="ok" title="the world really did change on this turn">✓</span> '
+        : `<span class="warn" title="the engine classified this turn as ${escapeHtml(e.outcome || "unclassified")} — nothing changed">✗</span> `;
+      return `<li><span class="where">${escapeHtml(where)}</span>${mark}${escapeHtml(e.text)}</li>`;
+    })
+    .join("");
+}
+
 function renderCheckpoints(list) {
   const el = $("s-checkpoints");
   if (!list || !list.length) {
@@ -930,6 +967,8 @@ function handle(event) {
       }
       state.memory = p.memory || [];
       renderMemory(state.memory);
+      state.journal = p.journal || null;
+      renderJournal(state.journal);
       // A chained run is started by the server, not by a click here; pick up
       // whether it is running once it has been set going.
       if (p.series && p.series.index > 1) setTimeout(refresh, 400);
@@ -989,6 +1028,18 @@ function handle(event) {
       state.memory.push(p);
       renderMemory(state.memory);
       note(`✎ kept: ${p.text}`);
+      break;
+
+    case "journal.written":
+      if (!state.journal) state.journal = [];
+      state.journal.push(p);
+      renderJournal(state.journal);
+      note(
+        (p.corroborated ? "✎ " : "✎ ✗ ") +
+          `journal: ${p.text}` +
+          (p.corroborated ? "" : ` — but the turn was ${p.outcome}, nothing changed`),
+        !p.corroborated
+      );
       break;
 
     case "run.restored":
@@ -1085,10 +1136,12 @@ function resetView() {
   state.discoveries.clear();
   state.discoveriesSeen.clear();
   state.memory = [];
+  state.journal = null;
   state.occupied.clear();
   renderCheckpoints([]);
   renderDiscoveries([]);
   renderMemory([]);
+  renderJournal(null);
   $("r-deaths").textContent = "0";
   $("q-headline").innerHTML = "<b>—</b> wasted &nbsp;·&nbsp; <b>—</b> futile";
   $("q-bar").innerHTML = "";
@@ -1188,6 +1241,8 @@ function applySummary(s) {
 
   if ((s.memory || []).length >= state.memory.length) state.memory = s.memory || [];
   renderMemory(state.memory);
+  if (s.journal) state.journal = s.journal;
+  renderJournal(state.journal);
   renderQuality(s.quality);
   renderCoverage(s.coverage);
   $("r-deaths").textContent = s.deaths || 0;
@@ -1226,6 +1281,7 @@ function syncAgentControls() {
   $("temp").style.display = local ? "" : "none";
   $("info").style.display = claude || local ? "" : "none";
   $("notebook").style.display = claude || local ? "" : "none";
+  $("journal").style.display = claude || local ? "" : "none";
   $("input-row").classList.toggle("on", agent === "human");
   if (local) loadLocalModels();
 }
@@ -1279,6 +1335,7 @@ $("new-run").onclick = async () => {
     temperature: parseFloat($("temp").value),
     runs: parseInt($("runs").value, 10) || 1,
     notebook: llm ? $("notebook").value : "off",
+    journal: llm && $("journal").value === "on",
     engine: $("engine").value,
     rom: $("rom").value || null,
     agent: $("agent").value,

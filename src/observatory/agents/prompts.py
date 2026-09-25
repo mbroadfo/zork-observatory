@@ -123,6 +123,42 @@ if lighting it fails, try turning it on.
 - Open everything you can open; containers hold useful things."""
 
 
+# --- the journal ---------------------------------------------------------
+#
+# Bolted on to whichever rung is in use, and only when the journal is switched
+# on, which is why it lives outside LEVELS. It splits in two, along the line
+# this module exists to hold:
+#
+#   That a journal exists and what it does is interface knowledge, like "look
+#   redescribes your surroundings". Every rung may be told it.
+#
+#   When to write in it is a tactic, so it is coaching, and it goes nowhere
+#   but COACHED. An uncoached player deciding for itself what is worth keeping
+#   is the measurement; telling it the answer would erase it.
+#
+# Both are held to the hygiene rules in tests/test_prompt_hygiene.py.
+JOURNAL_INTERFACE = """
+You keep a journal. Whatever you put in the `journal` field of your reply is \
+written down permanently: it survives everything else you can currently see, \
+and you will be shown it again later. Leave the field out on turns when there \
+is nothing you want to keep."""
+
+JOURNAL_DISCIPLINE = """
+Write in the journal when something you did changed the world — something \
+opened, something taken, a way that turned out to be passable. Record what you \
+did and where, in the words the game used, rather than what you concluded from \
+it. You will read these back as established fact, so a guess written down \
+becomes something you believe next time."""
+
+
+def with_journal(level: str) -> str:
+    """The prompt for `level`, plus the journal's instructions."""
+    text = get(level) + JOURNAL_INTERFACE
+    if level == "coached":
+        text += JOURNAL_DISCIPLINE
+    return text
+
+
 LEVELS: dict[str, str] = {
     "cold": COLD,
     "game": GAME,

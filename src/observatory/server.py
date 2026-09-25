@@ -160,6 +160,7 @@ class NewSession(BaseModel):
     num_ctx: int = DEFAULT_NUM_CTX   # ollama: smaller keeps a big model on the GPU
     temperature: float = DEFAULT_TEMPERATURE   # ollama: lower wanders less
     history_turns: int = DEFAULT_HISTORY   # exchanges of transcript per turn
+    journal: bool = False                  # let the agent keep a record of its own
     valid_actions: bool = False
     record: bool = True
     runs: int = 1                # chained runs; each starts from the first move
@@ -289,6 +290,7 @@ async def launch(req: NewSession, series: dict[str, int] | None = None) -> Sessi
             think=parse_think(req.think),
             num_ctx=req.num_ctx,
             temperature=req.temperature,
+            journal=req.journal,
         )
     except Exception as exc:
         engine.close()

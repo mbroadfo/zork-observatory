@@ -16,6 +16,7 @@ from typing import Any
 
 from . import llm, prompts
 from .base import Agent, AgentAction, TurnContext
+from .journal import Journal
 
 # How much the agent is told is an experimental variable — see prompts.py for
 # the ladder and for why "cold" does not produce a naive player. Every level
@@ -88,6 +89,7 @@ class ClaudeAgent(Agent):
         history_turns: int = 30,
         max_tokens: int = 2000,
         info_level: str = DEFAULT_INFO_LEVEL,
+        journal: Journal | None = None,
         api_key: str | None = None,
     ) -> None:
         import anthropic
@@ -97,7 +99,11 @@ class ClaudeAgent(Agent):
         self.history_turns = history_turns
         self.max_tokens = max_tokens
         self.info_level = info_level
-        self.system = prompts.get(info_level)
+        self.journal = journal
+        self.system = (
+            prompts.with_journal(info_level) if journal is not None
+            else prompts.get(info_level)
+        )
         self.name = f"claude:{model}" + ("" if info_level == DEFAULT_INFO_LEVEL else f"/{info_level}")
         self._client = anthropic.AsyncAnthropic(api_key=api_key) if api_key else anthropic.AsyncAnthropic()
         self._totals = {
@@ -114,7 +120,11 @@ class ClaudeAgent(Agent):
     def _messages(self, ctx: TurnContext) -> list[dict[str, Any]]:
         """The windowed transcript; `history_turns` is the single biggest cost
         lever here. The wording lives in llm.py, shared with every model."""
-        return [{"role": "user", "content": llm.turn_prompt(self.memory, ctx, self.history_turns)}]
+        return [{"role": "user", "content": llm.turn_prompt(
+            self.memory, ctx, self.history_turns, self.journal)}]
+
+    def _schema(self) -> dict[str, Any]:
+        return {"type": "json_schema", "schema": llm.move_fields(self.journal is not None)}
 
     # --- play ------------------------------------------------------------
 
@@ -133,7 +143,7 @@ class ClaudeAgent(Agent):
                         "cache_control": {"type": "ephemeral"},
                     }
                 ],
-                output_config=output_config(self.model, self.effort, MOVE_SCHEMA),
+                output_config=output_config(self.model, self.effort, self._schema()),
                 messages=self._messages(ctx),
             )
         except anthropic.APIStatusError as exc:
@@ -160,10 +170,12 @@ class ClaudeAgent(Agent):
         self._totals["latency_ms_total"] += latency_ms
 
         text = next((b.text for b in response.content if b.type == "text"), "")
+        journalled = ""
         try:
             data = json.loads(text)
             command = llm.clean_command(str(data.get("command", "look")))
             reasoning = str(data.get("reasoning", "")).strip()
+            journalled = str(data.get("journal") or "").strip()
         except (json.JSONDecodeError, AttributeError):
             command, reasoning = "look", f"[unparseable response: {text[:200]}]"
 
@@ -178,6 +190,7 @@ class ClaudeAgent(Agent):
                 "input_tokens": getattr(response.usage, "input_tokens", 0),
                 "output_tokens": getattr(response.usage, "output_tokens", 0),
                 "cache_read_tokens": getattr(response.usage, "cache_read_input_tokens", 0),
+                **({"journal": journalled} if journalled and self.journal is not None else {}),
             },
         )
 
@@ -197,7 +210,8 @@ class ClaudeAgent(Agent):
                 max_tokens=400,
                 system=[{"type": "text", "text": self.system, "cache_control": {"type": "ephemeral"}}],
                 output_config=output_config(self.model, self.effort),
-                messages=[{"role": "user", "content": llm.reflection_prompt(self.memory, ctx)}],
+                messages=[{"role": "user", "content": llm.reflection_prompt(
+                    self.memory, ctx, self.journal)}],
             )
         except (anthropic.APIStatusError, anthropic.APIConnectionError):
             return None
@@ -223,8 +237,12 @@ class ClaudeAgent(Agent):
             "history_turns": self.history_turns,
             "max_tokens": self.max_tokens,
             "info_level": self.info_level,
+            "journal": getattr(self, "journal", None) is not None,
             "system_prompt": self.system,
-            "system_fingerprint": prompts.fingerprint(self.info_level),
+            # Of the prompt actually sent, which the journal adds to. A run
+            # whose system prompt differs must not report the same fingerprint
+            # as one it does not match.
+            "system_fingerprint": hashlib.sha256(self.system.encode()).hexdigest()[:12],
         }
 
     def usage(self) -> dict[str, Any]:

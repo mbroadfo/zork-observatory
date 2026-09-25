@@ -624,6 +624,11 @@ ul.containers .cstate.open { color: var(--green); border-color: #2c4a32; }
 .vwords.warn { color: var(--amber); opacity: .8; }
 .vwords.empty { color: var(--dimmer); }
 
+/* The journal's verdict marks. An entry the engine corroborated and one it
+   did not are the same words from the agent; only the mark differs. */
+.memory .ok { color: var(--cyan); }
+.memory .warn { color: var(--amber); }
+
 .tree { font-size: 11.5px; }
 .tree details { margin-left: 9px; }
 .tree summary { cursor: pointer; padding: 1px 0; color: var(--text); }

@@ -160,6 +160,54 @@ a structured memory that **replaces** the transcript hides the descriptions
 that tell a player what is in front of them. If it is worth trying again, it
 belongs alongside the window, not instead of it.
 
+### The journal: a record the player keeps on purpose
+
+`--journal` (or the picker in the browser) adds one optional field to the
+reply the agent already makes:
+
+```json
+{"reasoning": "…", "command": "open window", "journal": "The window at the back of the house opens."}
+```
+
+Whatever it puts there is kept, rendered back beside the transcript on every
+later turn, and carried between runs by the notebook. It is a field rather than
+a tool call on purpose: a second round trip would double a local model's
+latency and go through the Ollama path that fails on gpt-oss, and as a field it
+is written in the same breath as the move that caused it.
+
+That timing is the point. The lessons in `agents/memory.py` are written at a
+death, from the last twelve exchanges, capped at two sentences, in answer to
+*"what do you believe you have learned"* — so a run asked at turn 200 cannot
+write down what the mailbox did at turn 2, because it can no longer see turn 2.
+What comes back is a theory about whatever happened last. A journal is written
+while the thing it is about is still on screen.
+
+**Every entry carries the engine's verdict on the turn it was written on.**
+`world/outcomes.py` already classifies each turn, and `progress` means the
+world really did change — a different state hash, room, score or inventory. So
+an entry is corroborated or it is not, and the ratio is a measurement rather
+than a reading. From the first fourteen turns of a qwen3:14b run:
+
+```text
+✓ turn  1  progress  open mailbox           Opened the mailbox.
+✓ turn  8  progress  take pile of leaves    took pile of leaves in Clearing
+✗ turn  9  inert     move grating           Moved the grating in Clearing.
+✗ turn 12  inert     open grating           Attempted to open the grating.
+✗ turn 14  inert     unlock grating …       Attempted to unlock the grating …
+                                            → 2/5 corroborated
+```
+
+The grating did not move. Nothing corrects the entry and nothing hides it — the
+agent wrote what it wrote, and that is the datum — but the gap between what
+changed and what was recorded is visible on turn 9 instead of four runs later,
+which is how long the notebook took to make the same kind of mistake legible.
+
+It is off by default, because a player that keeps no journal is the control arm
+for one that does, and that is the arm the sweep actually measured. The prompt
+splits along the usual line: **that** a journal exists is interface knowledge
+and every rung is told it; **what to put in it** is a tactic and only `coached`
+is told that. `tests/test_prompt_hygiene.py` enforces both.
+
 ## How it fits together
 
 ```text
@@ -487,7 +535,8 @@ src/observatory/
   world/        map graph built from observed transitions · frontier.py (its shape)
                 · object-tree diffing
   agents/       random · scripted · human · claude · ollama · llm.py (what every model is shown)
-                · memory.py (the lessons an agent keeps)
+                · memory.py (the lessons an agent keeps at a death)
+                · journal.py (what it writes down as it plays)
   session.py    the turn loop and the checkpoint stack
   notebook.py   what crosses from one run to the next
   events.py     the event bus

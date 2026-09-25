@@ -24,6 +24,7 @@ or not anyone was billed for it.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -34,6 +35,7 @@ from typing import Any, Awaitable, Callable
 
 from . import llm, prompts
 from .base import Agent, AgentAction, TurnContext
+from .journal import Journal
 
 DEFAULT_HOST = "http://localhost:11434"
 DEFAULT_INFO_LEVEL = "parser"
@@ -140,6 +142,7 @@ class OllamaAgent(Agent):
         temperature: float | None = 0.7,
         seed: int | None = None,
         max_tokens: int | None = DEFAULT_MAX_TOKENS,
+        journal: Journal | None = None,
         transport: Transport | None = None,
     ) -> None:
         if not model:
@@ -148,7 +151,13 @@ class OllamaAgent(Agent):
         self.host = resolve_host(host)
         self.history_turns = history_turns
         self.info_level = info_level
-        self.system = prompts.get(info_level)
+        self.journal = journal
+        # A player with a journal is being told something the others are not,
+        # so it is a different prompt and fingerprints as one.
+        self.system = (
+            prompts.with_journal(info_level) if journal is not None
+            else prompts.get(info_level)
+        )
         # None leaves the model's own default; False/True or low/medium/high
         # (the gpt-oss form) set it. Models that cannot think reject the field,
         # and that is remembered rather than retried every turn.
@@ -272,27 +281,30 @@ class OllamaAgent(Agent):
     # --- play ------------------------------------------------------------
 
     @staticmethod
-    def _parse(message: dict[str, Any]) -> tuple[str, str, bool]:
-        """(command, reasoning, structured) from a reply."""
+    def _parse(message: dict[str, Any]) -> tuple[str, str, str, bool]:
+        """(command, reasoning, journal, structured) from a reply."""
         text = (message.get("content") or "").strip()
         try:
             parsed = json.loads(text)
             return (
                 llm.clean_command(str(parsed.get("command", ""))),
                 str(parsed.get("reasoning", "")).strip(),
+                str(parsed.get("journal") or "").strip(),
                 True,
             )
         except (json.JSONDecodeError, AttributeError):
             # Small models sometimes answer in prose despite the format, and a
             # server that cannot carry a schema is asked in prose deliberately.
-            # The first line is still what it chose to type.
-            return llm.clean_command(text), "[reply was not in the requested format]", False
+            # The first line is still what it chose to type; there is no
+            # journal line to recover, and inventing one from the prose would
+            # put words the model did not choose into a permanent record.
+            return llm.clean_command(text), "[reply was not in the requested format]", "", False
 
     async def act(self, ctx: TurnContext) -> AgentAction:
-        prompt = llm.turn_prompt(self.memory, ctx, self.history_turns)
+        prompt = llm.turn_prompt(self.memory, ctx, self.history_turns, self.journal)
         crowded = self.context_warning(len(prompt) + len(self.system))
         started = time.perf_counter()
-        schema = llm.MOVE_FIELDS
+        schema = llm.move_fields(self.journal is not None)
         retried = ""
         try:
             data = await self._chat(prompt, schema, self.max_tokens)
@@ -313,7 +325,7 @@ class OllamaAgent(Agent):
         inp, out = self._count(data, (time.perf_counter() - started) * 1000)
 
         message = data.get("message") or {}
-        command, reasoning, structured = self._parse(message)
+        command, reasoning, journalled, structured = self._parse(message)
         thinking = message.get("thinking") or ""
         overran = data.get("done_reason") == "length" and not command
 
@@ -345,7 +357,7 @@ class OllamaAgent(Agent):
             if data:
                 i2, o2 = self._count(data, (time.perf_counter() - retry_started) * 1000)
                 inp, out = inp + i2, out + o2
-                command, reasoning, structured = self._parse(data.get("message") or {})
+                command, reasoning, journalled, structured = self._parse(data.get("message") or {})
                 if data.get("done_reason") == "length" and not command:
                     reasoning = "[ran past the output ceiling twice without answering]"
 
@@ -358,6 +370,11 @@ class OllamaAgent(Agent):
             meta["unstructured"] = True
         if not command:
             meta["error"] = True
+        if journalled and self.journal is not None:
+            # Carried on the action rather than written here. The session
+            # files it once the command has run, so the entry lands with the
+            # engine's verdict on the turn attached to it.
+            meta["journal"] = journalled
 
         return AgentAction(command=command or "look", thought=reasoning, meta=meta)
 
@@ -367,7 +384,7 @@ class OllamaAgent(Agent):
             # The tight cap only when thinking is known to be off; a model left
             # to its default may think, and would spend 400 tokens doing so.
             data = await self._chat(
-                llm.reflection_prompt(self.memory, ctx), None,
+                llm.reflection_prompt(self.memory, ctx, self.journal), None,
                 400 if self.think is False else self.max_tokens,
             )
         except OllamaError:
@@ -391,8 +408,9 @@ class OllamaAgent(Agent):
             "options": self._options(self.max_tokens),
             "history_turns": self.history_turns,
             "info_level": self.info_level,
+            "journal": self.journal is not None,
             "system_prompt": self.system,
-            "system_fingerprint": prompts.fingerprint(self.info_level),
+            "system_fingerprint": hashlib.sha256(self.system.encode()).hexdigest()[:12],
         }
 
     def usage(self) -> dict[str, Any]:

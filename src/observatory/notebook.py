@@ -25,6 +25,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .agents.journal import Entry, Journal
 from .agents.memory import AgentMemory, Lesson
 
 MODES = ("off", "carry", "new")
@@ -40,6 +41,10 @@ class Notebook:
         self.story = story
         self.agent = agent
         self.lessons: list[Lesson] = []
+        # What the agent wrote down as it played, kept apart from the lessons
+        # it wrote at the end. Both are the agent's own words; they answer
+        # different questions, and mixing them would lose which is which.
+        self.journal: list[Entry] = []
         self.runs: list[dict[str, Any]] = []
 
     # --- files -----------------------------------------------------------
@@ -59,6 +64,7 @@ class Notebook:
         if path.exists():
             data = json.loads(path.read_text(encoding="utf-8"))
             book.lessons = [Lesson.from_dict(d) for d in data.get("lessons", [])]
+            book.journal = [Entry.from_dict(d) for d in data.get("journal", [])]
             book.runs = list(data.get("runs", []))
         return book
 
@@ -74,15 +80,26 @@ class Notebook:
             "agent": self.agent,
             "runs": self.runs,
             "lessons": [lesson.to_dict() for lesson in self.lessons],
+            "journal": [entry.to_dict() for entry in self.journal],
         }
 
     # --- a run -----------------------------------------------------------
 
-    def begin_run(self, memory: AgentMemory, **meta: Any) -> int:
+    def begin_run(
+        self, memory: AgentMemory, journal: Journal | None = None, **meta: Any
+    ) -> int:
         """Hand the agent everything written so far and open a new run."""
         memory.lessons = list(self.lessons)
+        if journal is not None:
+            journal.entries = list(self.journal)
         number = len(self.runs) + 1
-        self.runs.append({"run": number, "started": time.time(), "notes_at_start": len(self.lessons), **meta})
+        self.runs.append({
+            "run": number,
+            "started": time.time(),
+            "notes_at_start": len(self.lessons),
+            "journal_at_start": len(self.journal),
+            **meta,
+        })
         self.save()
         return number
 
@@ -90,6 +107,11 @@ class Notebook:
         # Written the moment it exists: a run that crashes still leaves its
         # notes behind.
         self.lessons.append(lesson)
+        self.save()
+
+    def write(self, entry: Entry) -> None:
+        """Keep one journal entry. Same bargain as `add`: on disk at once."""
+        self.journal.append(entry)
         self.save()
 
     def end_run(self, **result: Any) -> None:
@@ -103,6 +125,8 @@ class Notebook:
             "agent": self.agent,
             "runs": len(self.runs),
             "notes": len(self.lessons),
+            "journal": len(self.journal),
+            "journal_corroborated": sum(1 for e in self.journal if e.corroborated),
             "history": [
                 {k: r.get(k) for k in ("run", "reason", "score", "max_score", "turns", "deaths", "censored")}
                 for r in self.runs

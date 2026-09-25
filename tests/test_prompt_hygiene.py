@@ -54,6 +54,52 @@ def test_no_level_gives_strategy_or_hazard_warnings(level, hint):
     )
 
 
+@pytest.mark.parametrize("level", CLEAN)
+@pytest.mark.parametrize("noun", WORLD_NOUNS)
+def test_the_journal_does_not_smuggle_world_knowledge_in(level, noun):
+    """Switching the journal on appends to whichever rung is in use. It is an
+    addition to the prompt like any other and is held to the same rule."""
+    assert noun not in prompts.with_journal(level).lower(), (
+        f"the journal text added to {level!r} mentions {noun!r}"
+    )
+
+
+@pytest.mark.parametrize("level", CLEAN)
+@pytest.mark.parametrize("hint", STRATEGY_HINTS)
+def test_the_journal_does_not_smuggle_strategy_in(level, hint):
+    assert hint not in prompts.with_journal(level).lower(), (
+        f"the journal text added to {level!r} contains {hint!r}"
+    )
+
+
+class TestTheJournalSplitsAlongTheSameLine:
+    """That a journal exists is interface knowledge; what to put in it is a
+    tactic. An uncoached player deciding for itself what is worth writing down
+    is the measurement, so telling it the answer would erase it."""
+
+    def test_every_rung_is_told_the_mechanic(self):
+        for level in prompts.LEVEL_ORDER:
+            assert "you keep a journal" in prompts.with_journal(level).lower()
+
+    def test_only_coached_is_told_what_to_write(self):
+        for level in CLEAN:
+            text = prompts.with_journal(level).lower()
+            for idea in ["changed the world", "opened", "taken", "established fact"]:
+                assert idea not in text, f"{level!r} leaks journal coaching: {idea!r}"
+        assert "changed the world" in prompts.with_journal("coached").lower()
+
+    def test_cold_still_does_not_reveal_that_it_is_a_game_or_has_a_parser(self):
+        cold = prompts.with_journal("cold").lower()
+        for giveaway in ["game", "play", "score", "adventure", "puzzle", "win",
+                         "parser", "verb", "noun", "north", "inventory"]:
+            assert giveaway not in cold, f"'cold' with a journal leaks {giveaway!r}"
+
+    def test_switching_it_on_is_a_different_prompt(self):
+        for level in prompts.LEVEL_ORDER:
+            assert prompts.with_journal(level) != prompts.get(level)
+            assert prompts.get(level) in prompts.with_journal(level)
+
+
 class TestTheLadderIsActuallyALadder:
     """Each rung must differ from its neighbours in the intended direction."""
 

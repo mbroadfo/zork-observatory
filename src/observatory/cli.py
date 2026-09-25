@@ -52,6 +52,10 @@ def _add_run_args(p: argparse.ArgumentParser) -> None:
                         "entirely on the GPU; overflow is dropped from the front, silently")
     p.add_argument("--history-turns", type=int, default=DEFAULT_HISTORY,
                    help="exchanges of transcript shown each turn")
+    p.add_argument("--journal", action="store_true",
+                   help="let the agent write a line of its own to keep, on any turn it "
+                        "chooses. Shown back beside the transcript, never instead of it, "
+                        "and carried between runs by the notebook")
     p.add_argument("--trace", default=None, help="write a JSONL trace here")
     p.add_argument("--runs", type=int, default=1,
                    help="play this many runs back to back, each from the first move")
@@ -87,7 +91,7 @@ async def _play_once(args: argparse.Namespace, notebook_mode: str, series: dict[
             args.agent, commands=script, seed=args.seed, model=args.model, effort=args.effort,
             history_turns=args.history_turns, info_level=args.info_level,
             think=parse_think(args.think), num_ctx=args.num_ctx,
-            temperature=args.temperature,
+            temperature=args.temperature, journal=args.journal,
         )
     except ValueError as exc:
         print(exc, file=sys.stderr)

@@ -81,6 +81,10 @@
       <option value="carry">notebook: carry on</option>
       <option value="new">notebook: start new</option>
     </select>
+    <select id="journal" title="Let the player write a line of its own to keep, on any turn it chooses. Shown back beside the transcript, never instead of it." style="display:none">
+      <option value="off" selected>journal: none</option>
+      <option value="on">journal: keep one</option>
+    </select>
     <button id="new-run" class="primary">New run</button>
   </div>
 
@@ -226,6 +230,11 @@
         <h3>Memory <span id="mem-count" class="count-inline"></span></h3>
         <div class="hint" style="margin-bottom:6px">what it kept when the world was rolled back</div>
         <ol class="memory" id="s-memory"></ol>
+      </div>
+      <div class="section" id="journal-section" style="display:none">
+        <h3>Journal <span id="j-count" class="count-inline"></span></h3>
+        <div class="hint" style="margin-bottom:6px">what it chose to write down, and whether the world agreed</div>
+        <ol class="memory" id="s-journal"></ol>
       </div>
       <div class="section">
         <h3>This turn changed</h3>

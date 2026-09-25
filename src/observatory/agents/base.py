@@ -12,6 +12,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
+from .journal import Journal
 from .memory import AgentMemory
 
 
@@ -44,6 +45,9 @@ class Agent(ABC):
     kind: str = "generic"
 
     _memory: AgentMemory | None = None
+    # None means the player keeps no journal, which is the default and the
+    # control arm for keeping one. Set by build_agent when it is switched on.
+    journal: Journal | None = None
 
     @property
     def memory(self) -> AgentMemory:

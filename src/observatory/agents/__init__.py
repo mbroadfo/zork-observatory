@@ -1,5 +1,6 @@
 from . import prompts
 from .base import Agent, AgentAction, TurnContext
+from .journal import Journal
 from .llm import DEFAULT_HISTORY
 
 # Kept here so the CLI and server can name the defaults without importing the
@@ -15,6 +16,7 @@ __all__ = [
     "Agent",
     "AgentAction",
     "TurnContext",
+    "Journal",
     "prompts",
     "RandomAgent",
     "ScriptedAgent",
@@ -56,6 +58,9 @@ def build_agent(kind: str, **kwargs) -> Agent:
     history = kwargs.get("history_turns")
     if history is None:
         history = DEFAULT_HISTORY
+    # Off unless asked for. A player that keeps no journal is the control arm
+    # for keeping one, and it is the one that has been measured.
+    journal = Journal() if kwargs.get("journal") else None
     if kind == "claude":
         from .claude_agent import ClaudeAgent
 
@@ -64,6 +69,7 @@ def build_agent(kind: str, **kwargs) -> Agent:
             effort=kwargs.get("effort", "medium"),
             history_turns=history,
             info_level=kwargs.get("info_level", "parser"),
+            journal=journal,
         )
     if kind == "ollama":
         from .ollama_agent import OllamaAgent
@@ -76,5 +82,6 @@ def build_agent(kind: str, **kwargs) -> Agent:
             seed=kwargs.get("seed"),
             num_ctx=kwargs.get("num_ctx") or DEFAULT_NUM_CTX,
             temperature=kwargs.get("temperature", DEFAULT_TEMPERATURE),
+            journal=journal,
         )
     raise ValueError(f"Unknown agent: {kind!r} (expected {', '.join(AGENTS)})")

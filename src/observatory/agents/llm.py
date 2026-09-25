@@ -12,6 +12,7 @@ from typing import Any
 
 from . import memory
 from .base import TurnContext
+from .journal import Journal
 from .memory import AgentMemory
 
 # The move format. Two fields on purpose: `command` is what the game receives,
@@ -35,6 +36,31 @@ MOVE_FIELDS: dict[str, Any] = {
     "additionalProperties": False,
 }
 
+# The journal line, when the journal is switched on. Optional on purpose: a
+# turn with nothing worth keeping should cost nothing to leave blank, and a
+# required field would be filled every turn whether or not anything happened.
+#
+# Carried on the move rather than fetched by a separate tool call. A second
+# call would double the latency of a local model and go through Ollama's
+# tool-call path, which is the one that fails on gpt-oss; as a field it is free,
+# and it is written in the same breath as the command that caused it.
+JOURNAL_FIELD: dict[str, Any] = {
+    "type": "string",
+    "description": "Optional. One line to keep permanently, if this turn "
+                   "established something worth keeping. Omit it otherwise.",
+}
+
+
+def move_fields(journal: bool = False) -> dict[str, Any]:
+    """The reply schema, with the journal line when it is switched on."""
+    if not journal:
+        return MOVE_FIELDS
+    schema = {
+        **MOVE_FIELDS,
+        "properties": {**MOVE_FIELDS["properties"], "journal": JOURNAL_FIELD},
+    }
+    return schema
+
 # A command is one line typed at a prompt. Anything longer is a model talking,
 # and the interpreter would only choke on it.
 MAX_COMMAND_CHARS = 120
@@ -46,7 +72,12 @@ MAX_COMMAND_CHARS = 120
 DEFAULT_HISTORY = 30
 
 
-def turn_prompt(mem: AgentMemory, ctx: TurnContext, history_turns: int) -> str:
+def turn_prompt(
+    mem: AgentMemory,
+    ctx: TurnContext,
+    history_turns: int,
+    journal: Journal | None = None,
+) -> str:
     """One user turn carrying a windowed transcript.
 
     A rolling window rather than the whole history: past a few dozen turns the
@@ -70,6 +101,14 @@ def turn_prompt(mem: AgentMemory, ctx: TurnContext, history_turns: int) -> str:
         lines.append(remembered)
         lines.append("")
 
+    # Beside the transcript, never instead of it, and nearest to it: what the
+    # agent wrote down is the last thing it reads before the last thing it saw.
+    if journal is not None:
+        written = journal.render()
+        if written:
+            lines.append(written)
+            lines.append("")
+
     if history_turns > 0:
         for command, response in ctx.transcript[-history_turns:]:
             if command:
@@ -82,15 +121,28 @@ def turn_prompt(mem: AgentMemory, ctx: TurnContext, history_turns: int) -> str:
     return "\n".join(lines)
 
 
-def reflection_prompt(mem: AgentMemory, ctx: TurnContext) -> str:
+def reflection_prompt(
+    mem: AgentMemory, ctx: TurnContext, journal: Journal | None = None
+) -> str:
     """The tail of the transcript and the reflection question, nothing else —
     no object tree, no cause of death from the engine. If the agent misreads
-    its own death, that misreading is the thing worth recording."""
+    its own death, that misreading is the thing worth recording.
+
+    The journal is shown when there is one. Twelve exchanges is a keyhole to
+    summarize two hundred turns through, and it is why the notes this produces
+    are about whatever happened last; a player that wrote things down as it
+    went should get to read them before being asked what it learned.
+    """
     lines = []
     remembered = mem.render()
     if remembered:
         lines.append(remembered)
         lines.append("")
+    if journal is not None:
+        written = journal.render()
+        if written:
+            lines.append(written)
+            lines.append("")
     for command, response in ctx.transcript[-12:]:
         if command:
             lines.append(f"> {command}")

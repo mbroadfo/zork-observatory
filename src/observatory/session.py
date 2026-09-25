@@ -131,6 +131,9 @@ class Session:
         self._agent_save: Checkpoint | None = None
         self._paused = True
         self._resume = asyncio.Event()
+        # What the agent asked to write down this turn, held until the command
+        # has run so the entry can be filed with the engine's verdict on it.
+        self._pending_journal: str = ""
         self._prev_objects: list = []
         self._prev_room_id: str | None = None
         self._last_state: WorldState | None = None
@@ -152,7 +155,9 @@ class Session:
         obs, state = self.engine.reset()
         notebook = None
         if self.notebook:
-            self.run_number = self.notebook.begin_run(self.agent.memory, session=self.id)
+            self.run_number = self.notebook.begin_run(
+                self.agent.memory, self.agent.journal, session=self.id
+            )
             notebook = self.notebook.summary()
 
         self._emit(
@@ -167,6 +172,7 @@ class Session:
             notebook=notebook,
             series=self.series,
             memory=self.agent.memory.to_dict(),
+            journal=self.agent.journal.to_dict() if self.agent.journal else None,
         )
         self._ingest(command="", obs=obs, state=state)
         await self.agent.on_start(obs.text)
@@ -290,6 +296,33 @@ class Session:
         ):
             self._emit("discovery.made", **discovery.to_dict(), summary=self.ledger.summary())
 
+        # The journal entry the agent asked for, filed now that the turn has
+        # been classified. The engine's verdict rides along with it: PROGRESS
+        # means the world really did change, and anything else means the agent
+        # recorded an achievement the world did not corroborate. Neither is
+        # corrected or withheld — it wrote what it wrote — but the difference
+        # is the measurement, so it is stored rather than inferred later.
+        if self._pending_journal and self.agent.journal is not None:
+            entry = self.agent.journal.add(
+                self._pending_journal,
+                turn=self.turn,
+                # Where the command was given, not where it landed: an entry
+                # about opening a window belongs to the room with the window.
+                room=outcome.room if outcome else state.location_name,
+                command=command,
+                outcome=outcome.outcome.value if outcome else "",
+                run=self.run_number,
+            )
+            if entry is not None:
+                if self.notebook:
+                    self.notebook.write(entry)
+                self._emit(
+                    "journal.written",
+                    **entry.to_dict(),
+                    summary=self.agent.journal.summary(),
+                )
+        self._pending_journal = ""
+
         self.transcript.append((command, obs.text))
         self._prev_objects = list(state.objects)
         self._prev_room_id = room_id
@@ -329,6 +362,8 @@ class Session:
             self._emit("agent.thought", turn=self.turn, text=action.thought, meta=action.meta)
 
         self._emit("command.issued", turn=self.turn, command=action.command, meta=action.meta)
+
+        self._pending_journal = str(action.meta.get("journal") or "")
 
         # SAVE and RESTORE never reach the parser.
         #
@@ -569,6 +604,7 @@ class Session:
             deaths=self.deaths,
             lives_used=self.life,
             memory=self.agent.memory.to_dict(),
+            journal=self.agent.journal.summary() if self.agent.journal else None,
             turns=self.turn,
             steps=self.steps,
             final_score=state.score if state else 0,
@@ -659,6 +695,8 @@ class Session:
             "life": self.life,
             "lives_left": self.lives_left,
             "memory": self.agent.memory.to_dict(),
+            "journal": self.agent.journal.to_dict() if self.agent.journal else None,
+            "journal_summary": self.agent.journal.summary() if self.agent.journal else None,
             "notebook": self.notebook.summary() if self.notebook else None,
             "run_number": self.run_number,
             "series": self.series,
