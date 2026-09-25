@@ -99,7 +99,19 @@ CORROBORATING = ("progress",)
 # repeating itself.
 UNCORROBORATED = "uncorroborated"   # the turn changed nothing
 MOVEMENT = "movement"               # true, but the map already records it
+HEDGED = "hedged"                   # true, and records only that it was tried
 REDUNDANT = "redundant"             # true, and already written down
+
+# A line that records an attempt rather than a result.
+#
+# The model has a word for its own uncertainty and uses it consistently, so it
+# can be taken at that word. "Attempted to cut the nails with the elvish sword"
+# was written on a turn that changed something, so it was kept — and it says
+# nothing a future reader can use, because cutting the nails does not work. It
+# then sat in the record across two runs while the model sawed at the door.
+# "Took the sack from the table" and "Entered the kitchen through the window"
+# survive this; nothing that only reports having had a go does.
+_HEDGED = re.compile(r"^(?:i\s+)?(?:attempt|tried|trying|try\b)", re.IGNORECASE)
 
 
 @dataclass
@@ -204,6 +216,13 @@ class Journal:
           the forest path" and its variants, crowding out the eight that said
           anything the map does not.
 
+          It records only that something was tried. "Attempted to" is the
+          model's own word for not knowing whether it worked, and a turn can
+          change something while the thing the sentence is about fails —
+          which is how "Attempted to cut the nails with the elvish sword"
+          became permanent, and how the model came to spend two runs sawing
+          at a door on the strength of it.
+
           It says something already written. Matched on the room and command
           as well as the words, because the same act gets described several
           ways — and matched on the words with any "Turn 82:" stamp removed,
@@ -220,6 +239,8 @@ class Journal:
             return self._refuse(entry, UNCORROBORATED)
         if movement and not self.keep_movement:
             return self._refuse(entry, MOVEMENT)
+        if _HEDGED.match(normalized(text)):
+            return self._refuse(entry, HEDGED)
         if self._already_said(entry):
             return self._refuse(entry, REDUNDANT)
         self.entries.append(entry)
@@ -280,10 +301,11 @@ class Journal:
                         live stuck-detector: near zero while a run is getting
                         somewhere, and the bulk of the traffic once it is not.
 
-          redundant / movement
+          redundant / movement / hedged
                         true, and dropped anyway. High numbers here are not a
                         fault in the model, they are the record refusing to
-                        fill up with what it already holds.
+                        fill up with what it already holds, or with lines that
+                        report having had a go at something.
         """
         attempted = self.attempted
         reasons: dict[str, int] = {}
@@ -313,6 +335,7 @@ class Journal:
             "false": reasons.get(UNCORROBORATED, 0),
             "redundant": reasons.get(REDUNDANT, 0),
             "movement": reasons.get(MOVEMENT, 0),
+            "hedged": reasons.get(HEDGED, 0),
             "outcomes": outcomes,
             "false_outcomes": refused_outcomes,
             "filtered": self.corroborated_only,

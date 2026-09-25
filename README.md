@@ -219,6 +219,12 @@ path"* and its variants, crowding out the eight that said anything the map does
 not. **Repetition**: the same act gets written several ways, and a model will
 copy the previous line verbatim onto the next turn, so the check matches on
 `(room, command)` as well as on the words with any `Turn 82:` stamp removed.
+**Hedging**: a line beginning *"Attempted to…"* records only that something
+was tried. A turn can change something while the thing the sentence is about
+fails — that is how *"Attempted to cut the nails with the elvish sword"* became
+permanent, and why the model spent two runs sawing at a door on the strength of
+it. The model has its own word for not knowing whether something worked, and it
+is taken at that word.
 
 That makes three numbers where there was one, because they answer different
 questions and a single figure answered none of them honestly:
@@ -233,8 +239,10 @@ false          claims about turns where nothing happened. The live
                stuck-detector: near zero while a run is getting somewhere,
                the bulk of the traffic once it is not.
 redundant
-movement       true, and dropped anyway. Not a fault in the model — the
-               record refusing to fill up with what it already holds.
+movement
+hedged         true, and dropped anyway. Not a fault in the model — the
+               record refusing to fill up with what it already holds, or with
+               lines that only report having had a go at something.
 ```
 
 Two limitations, stated rather than buried. A turn that only reveals

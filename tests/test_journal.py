@@ -166,6 +166,36 @@ class TestWhatIsTrueButNotWorthKeeping:
         entry = j.add("Turn 82: Took the sack.", turn=82, outcome="progress")
         assert entry is not None and entry.text == "Turn 82: Took the sack."
 
+    def test_a_line_that_only_records_having_tried_is_refused(self):
+        """A turn can change something while the thing the sentence is about
+        fails. "Attempted to cut the nails with the elvish sword" was kept on
+        exactly such a turn and outlived two runs of sawing at the door."""
+        j = Journal()
+        for hedge in ["Attempted to cut the nails with the elvish sword.",
+                      "Attempting to open the grating.",
+                      "Tried to tie the rope to the door.",
+                      "I tried the window.",
+                      "Turn 25: Attempted to unlock it."]:
+            assert j.add(hedge, turn=25, outcome="progress") is None
+        assert {e.reason for e in j.rejected} == {"hedged"}
+        assert j.summary()["hedged"] == 5
+
+    def test_a_line_that_records_a_result_survives(self):
+        j = Journal()
+        for real in ["Took the sack from the table.",
+                     "Entered the kitchen through the window.",
+                     "Opened the mailbox.",
+                     "The trophy case is now open."]:
+            assert j.add(real, turn=1, room=real, command=real, outcome="progress") is not None
+
+    def test_hedged_lines_were_still_true(self):
+        """It did attempt it. The line is useless, not false — counting it as
+        fiction would misread the model."""
+        j = Journal()
+        j.add("Attempted to cut the nails.", turn=25, outcome="progress")
+        assert j.summary()["truthful_pct"] == 100.0
+        assert j.summary()["false"] == 0
+
     def test_true_but_dropped_still_counts_as_truthful(self):
         j = Journal()
         j.add("Opened it.", turn=1, room="Hall", command="open door", outcome="progress")
@@ -218,6 +248,7 @@ class TestCorroboration:
             "false": 2,
             "redundant": 0,
             "movement": 0,
+            "hedged": 0,
             "outcomes": {"progress": 2},
             "false_outcomes": {"inert": 1, "futile": 1},
             "filtered": True,
