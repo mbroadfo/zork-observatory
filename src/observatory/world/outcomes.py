@@ -100,12 +100,27 @@ class OutcomeTally:
         # Winning is progress by definition, even when the final move leaves
         # every tracked field as it was (Zork's does: the player never leaves
         # the barrow's doorstep, the game just ends).
-        changed = prev_state is None or obs.won or (
-            state.state_hash != prev_state.state_hash
-            or state.location_id != prev_state.location_id
+        #
+        # The hash is the broadest of the four tests and the least specific: it
+        # covers the whole machine, including bookkeeping no command caused. On
+        # the first command of a run it moves by itself — Zork called an
+        # identical "You can't see any leaflet here!" progress on turn one and
+        # absent on turn two, on nothing but that — so a hash that wobbles
+        # while location, score and inventory all hold still is not taken as
+        # change when the game has just said it did not understand or could not
+        # find the thing. The reply is evidence as much as the state is.
+        material = prev_state is not None and (
+            state.location_id != prev_state.location_id
             or state.score != prev_state.score
             or state.inventory != prev_state.inventory
         )
+        hashed = prev_state is not None and state.state_hash != prev_state.state_hash
+        refused = (
+            _is_refusal(obs.text, UNKNOWN_WORD)
+            or _is_refusal(obs.text, GRAMMAR)
+            or _is_refusal(obs.text, NO_SUCH_THING)
+        )
+        changed = prev_state is None or obs.won or material or (hashed and not refused)
 
         key = (prev_room, cmd)
         if changed:

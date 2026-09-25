@@ -55,6 +55,54 @@ class TestClassification:
         assert tally.classify("north", obs, after, before).outcome is Outcome.PROGRESS
 
 
+class TestTheHashIsNotTheOnlyWitness:
+    """The state hash covers the whole machine, including bookkeeping no
+    command caused. On the first turn of a Zork run it moves by itself, and an
+    identical "You can't see any leaflet here!" was read as progress on turn
+    one and as absent on turn two — which let a journal entry claiming a thing
+    had been taken pass a check whose entire job is to catch that."""
+
+    def _refused(self, text: str) -> Outcome:
+        from observatory.engine.base import Observation, WorldState
+
+        before = WorldState(location_id=1, location_name="West of House",
+                            score=0, state_hash="a", inventory=[])
+        after = WorldState(location_id=1, location_name="West of House",
+                           score=0, state_hash="b", inventory=[])   # hash moved
+        obs = Observation(text=text, score=0, moves=1)
+        return OutcomeTally().classify("take leaflet", obs, after, before).outcome
+
+    def test_a_refusal_is_not_progress_just_because_the_hash_moved(self):
+        assert self._refused("You can't see any leaflet here!") is Outcome.ABSENT_NOUN
+
+    def test_the_same_holds_for_unknown_words_and_bad_grammar(self):
+        assert self._refused('I don\'t know the word "above".') is Outcome.UNKNOWN_WORD
+        assert self._refused("That sentence isn't one I recognize.") is Outcome.GRAMMAR
+
+    def test_a_hash_change_with_no_refusal_is_still_progress(self):
+        """Opening a mailbox moves nothing but the hash, and is real."""
+        from observatory.engine.base import Observation, WorldState
+
+        before = WorldState(location_id=1, location_name="West of House",
+                            score=0, state_hash="a", inventory=[])
+        after = WorldState(location_id=1, location_name="West of House",
+                           score=0, state_hash="b", inventory=[])
+        obs = Observation(text="Opening the small mailbox reveals a leaflet.", score=0, moves=1)
+        assert OutcomeTally().classify("open mailbox", obs, after, before).outcome is Outcome.PROGRESS
+
+    def test_a_real_change_outranks_a_refusal_shaped_reply(self):
+        """Location, score and inventory are specific enough to be believed
+        whatever the prose says."""
+        from observatory.engine.base import Observation, WorldState
+
+        before = WorldState(location_id=1, location_name="A", score=0,
+                            state_hash="a", inventory=[])
+        after = WorldState(location_id=2, location_name="B", score=0,
+                           state_hash="b", inventory=[])
+        obs = Observation(text='I don\'t know the word "above".', score=0, moves=1)
+        assert OutcomeTally().classify("north", obs, after, before).outcome is Outcome.PROGRESS
+
+
 class TestFutility:
     def test_the_first_failure_is_not_futile(self):
         assert classify(["east"]) == [Outcome.BLOCKED]

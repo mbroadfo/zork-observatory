@@ -245,6 +245,20 @@ hedged         true, and dropped anyway. Not a fault in the model — the
                lines that only report having had a go at something.
 ```
 
+Each entry is shown with **the command that produced it**, verbatim:
+
+```text
+- [run 1, turn 88 (Living Room)] "take elvish sword" worked: Took the elvish
+  sword from above the trophy case.
+```
+
+Without that the prose gets read as an instruction. A run carrying only the
+note typed `take elvish sword from above the trophy case`, was told the parser
+has no word "above", tried `take elvish sword from trophy case` six times, and
+reached `take elvish sword` — the command the entry had been stored with all
+along — on its eighth turn. The note is a paraphrase and can be wrong about the
+world; the command is what was actually typed and cannot be.
+
 Two limitations, stated rather than buried. A turn that only reveals
 information — reading a leaflet, examining a thing — changes no state, so it is
 `inert` and refused however worth remembering it was. And corroboration checks

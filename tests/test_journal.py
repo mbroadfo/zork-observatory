@@ -217,6 +217,30 @@ class TestReadingBack:
         assert "The window at the back of the house opens." in rendered
         assert "run 2, turn 14 (Behind House)" in rendered
 
+    def test_the_command_that_worked_is_shown_beside_the_note(self):
+        """Without it the prose gets read as an instruction: a run carrying
+        "Took the elvish sword from above the trophy case" typed exactly that,
+        learned the parser has no word "above", and burned eight turns before
+        trying `take elvish sword` — the command the entry was stored with."""
+        j = Journal()
+        kept(j, "Took the elvish sword from above the trophy case.", turn=88,
+             room="Living Room", command="take elvish sword")
+        assert '"take elvish sword" worked: Took the elvish sword' in j.render()
+
+    def test_an_entry_with_no_command_still_renders(self):
+        j = Journal()
+        kept(j, "Something happened.", turn=3)
+        assert "Something happened." in j.render()
+        assert '"" worked' not in j.render()
+
+    def test_the_rendering_is_plain_ascii(self):
+        """It is worth copying verbatim, so it should not depend on the
+        transport carrying anything cleverer than ASCII."""
+        j = Journal()
+        kept(j, "Took the sack from the table.", turn=82,
+             room="Kitchen", command="take sack", run=2)
+        j.render().encode("ascii")
+
     def test_an_empty_journal_renders_as_nothing_at_all(self):
         """Same rule as an empty memory: at the bottom of the ladder a heading
         about a journal it has not written in is a fact it has not earned."""

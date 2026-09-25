@@ -267,6 +267,22 @@ class Journal:
         Entries are given back exactly as they were written, with where and
         when attached. Nothing is summarized, re-ordered or interpreted on the
         way out: the point of the record is that it is the record.
+
+        The command that produced each entry is shown beside it, verbatim,
+        because without it the prose gets read as an instruction. A run
+        carrying "Took the elvish sword from above the trophy case" typed
+        `take elvish sword from above the trophy case`, was told the parser
+        does not know "above", tried `take elvish sword from trophy case` six
+        times, and only then tried `take elvish sword` — which is the command
+        the entry was stored with the whole time, and which works. The note is
+        the model's paraphrase and can be wrong about the world; the command
+        is what it actually typed and cannot be. "worked" is a claim the
+        harness is entitled to make — every kept entry is corroborated by
+        construction — and it is the most useful thing in the line.
+
+        Plain ASCII, deliberately. This goes to a local model over a JSON
+        transport that would carry anything, but a record whose value is that
+        it can be copied verbatim should not depend on that being true.
         """
         if not self.entries:
             return ""
@@ -275,7 +291,8 @@ class Journal:
         for entry in recent:
             where = f" ({entry.room})" if entry.room else ""
             run = f"run {entry.run}, " if entry.run else ""
-            lines.append(f"- [{run}turn {entry.turn}{where}] {entry.text}")
+            typed = f'"{entry.command}" worked: ' if entry.command else ""
+            lines.append(f"- [{run}turn {entry.turn}{where}] {typed}{entry.text}")
         if len(self.entries) > len(recent):
             lines.append(f"({len(self.entries) - len(recent)} earlier entries not shown)")
         return "\n".join(lines)
