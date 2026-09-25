@@ -88,6 +88,7 @@ class OutcomeTally:
         obs: Observation,
         state: WorldState,
         prev_state: WorldState | None,
+        witnessed: bool = False,
     ) -> TurnOutcome:
         cmd = " ".join(command.strip().lower().split())
         room = state.location_name or str(state.location_id)
@@ -95,32 +96,33 @@ class OutcomeTally:
             prev_state.location_name or str(prev_state.location_id)
         ) if prev_state else room
 
-        # "Did the world change" is the only test that needs no game knowledge,
-        # so it is asked first and everything else is a refinement of *why not*.
-        # Winning is progress by definition, even when the final move leaves
-        # every tracked field as it was (Zork's does: the player never leaves
-        # the barrow's doorstep, the game just ends).
+        # "Did the world change, in a way the player could see" — the only test
+        # that needs no game knowledge, so it is asked first and everything
+        # else is a refinement of *why not*.
         #
-        # The hash is the broadest of the four tests and the least specific: it
-        # covers the whole machine, including bookkeeping no command caused. On
-        # the first command of a run it moves by itself — Zork called an
-        # identical "You can't see any leaflet here!" progress on turn one and
-        # absent on turn two, on nothing but that — so a hash that wobbles
-        # while location, score and inventory all hold still is not taken as
-        # change when the game has just said it did not understand or could not
-        # find the thing. The reply is evidence as much as the state is.
-        material = prev_state is not None and (
+        # `witnessed` is the object tree's answer: did anything the player can
+        # actually see move, open, or change hands. The caller computes it, and
+        # filters it to what was in view, which is what makes it usable — the
+        # whole tree moves on its own, Zork's thief walking the dungeon from
+        # turn one.
+        #
+        # It replaced the state hash, which was the obvious test and the wrong
+        # one. The hash covers the entire machine, so the game's own clock and
+        # dice move it: `examine tree` on the Forest Path scored progress
+        # because a song bird happened to chirp, while `examine grating` four
+        # turns later scored inert because nothing ambient fired. Noisy rather
+        # than always-wrong, which is the worst kind. The same hash gave every
+        # run's first command a free pass, calling an identical "You can't see
+        # any leaflet here!" progress on turn one and absent on turn two.
+        #
+        # Winning is progress by definition even when nothing tracked here
+        # moves: Zork's winning move leaves the player on the barrow's
+        # doorstep and simply ends the game.
+        changed = prev_state is None or obs.won or witnessed or (
             state.location_id != prev_state.location_id
             or state.score != prev_state.score
             or state.inventory != prev_state.inventory
         )
-        hashed = prev_state is not None and state.state_hash != prev_state.state_hash
-        refused = (
-            _is_refusal(obs.text, UNKNOWN_WORD)
-            or _is_refusal(obs.text, GRAMMAR)
-            or _is_refusal(obs.text, NO_SUCH_THING)
-        )
-        changed = prev_state is None or obs.won or material or (hashed and not refused)
 
         key = (prev_room, cmd)
         if changed:

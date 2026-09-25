@@ -17,7 +17,7 @@ from ..engine.base import WorldObject
 class ObjectChange:
     num: int
     name: str
-    kind: str          # "moved" | "appeared" | "vanished" | "renamed"
+    kind: str          # "moved" | "appeared" | "vanished" | "renamed" | "changed"
     before: Any = None
     after: Any = None
 
@@ -41,6 +41,16 @@ def diff_objects(
             changes.append(ObjectChange(num, obj.name, "moved", old.parent, obj.parent))
         if old.name != obj.name:
             changes.append(ObjectChange(num, obj.name, "renamed", old.name, obj.name))
+        # Opening a box moves nothing. The Z-machine flips an attribute bit and
+        # the parent pointers stay exactly where they were, so a diff that
+        # watched only the tree's shape called `open mailbox` a turn in which
+        # nothing happened — which matters now that this diff is what decides
+        # whether a turn made progress. Which bit means "open" is per-game and
+        # is deliberately not guessed at: that any of them moved is enough.
+        if old.attributes != obj.attributes:
+            changes.append(
+                ObjectChange(num, obj.name, "changed", old.attributes, obj.attributes)
+            )
 
     for num, obj in prev.items():
         if num not in curr:

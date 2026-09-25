@@ -184,11 +184,27 @@ while the thing it is about is still on screen.
 
 **Only entries the world bore out are kept.** The observatory has the
 Z-machine's own state on both sides of every command, and `world/outcomes.py`
-already classifies each turn: `progress` means the state hash, room, score or
-inventory actually differs from before. An entry offered on a `progress` turn
-is kept; one offered on an `inert`, `futile` or `blocked` turn is counted,
-traced and thrown away. The agent still chooses what to write and the words
-stay its own — the world decides which of them last.
+already classifies each turn: `progress` means **something the player could see
+actually changed** — an object in view moved, opened or changed hands, or the
+room, score or inventory differs. An entry offered on a `progress` turn is
+kept; one offered on an `inert`, `futile` or `blocked` turn is counted, traced
+and thrown away. The agent still chooses what to write and the words stay its
+own — the world decides which of them last.
+
+Getting that test right took three tries, and the two failures are worth
+recording because both looked obviously correct. The **state hash** covers the
+whole machine, so the game's own clock and dice move it: `examine tree` scored
+progress because a song bird happened to chirp on that turn, and a journal
+entry about a tree that had not changed was kept on the strength of it. The
+hash also gave every run's first command a free pass, calling an identical
+*"You can't see any leaflet here!"* progress on turn one and `absent` on turn
+two. Replacing it with the **object tree's own diff** then went too far the
+other way — `open mailbox` moves no object and was read as nothing happening —
+until the diff learned to watch attributes, at which point *every* command
+scored progress, because Zork flips a bit on the player object whenever it
+understands one at all. Excluding the player settles it. Measured, not assumed:
+examining in Zork touches nothing, while opening a box sets its open bit and
+closing it clears the same bit again.
 
 That is not how it was built. The first version kept everything, and the run
 that measured it is the argument for the change. Over ninety-five turns a

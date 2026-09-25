@@ -114,6 +114,21 @@ class TestObjectDiff:
         objs = [self.obj(1, "lamp", 10), self.obj(2, "sword", 10)]
         assert diff_objects(objs, list(objs)) == []
 
+    def test_detects_an_attribute_flipping_as_a_change(self):
+        """Opening a box moves nothing. The Z-machine flips a bit and every
+        parent pointer stays where it was, so a diff watching only the tree's
+        shape called `open mailbox` a turn in which nothing happened — which
+        matters, because this diff is what decides whether a turn made
+        progress. Measured against Zork: opening sets bit 11 on the mailbox
+        and closing clears the same bit."""
+        before = [WorldObject(num=1, name="mailbox", parent=10, child=0, sibling=0,
+                              attributes=[3])]
+        after = [WorldObject(num=1, name="mailbox", parent=10, child=0, sibling=0,
+                             attributes=[3, 11])]
+
+        (change,) = diff_objects(before, after)
+        assert (change.kind, change.before, change.after) == ("changed", [3], [3, 11])
+
     def test_detects_appearance_and_disappearance(self):
         before = [self.obj(1, "lamp", 10)]
         after = [self.obj(2, "thief", 10)]

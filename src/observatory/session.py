@@ -202,11 +202,34 @@ class Session:
         )
         visible = probe.visible_objects()
 
+        # What changed that the agent could have witnessed.
+        #
+        # The object tree is the whole world and it keeps moving without the
+        # player: Zork's thief wanders the dungeon from turn one, so an
+        # unfiltered delta announced his position every few turns to an agent
+        # who had never met him. That is the game's knowledge, not the run's.
+        changes = [
+            c for c in diff_objects(self._prev_objects, state.objects)
+            if c.num in visible
+        ]
+
+        # Everything above except the player, which is the observer rather than
+        # part of what is observed. Zork flips a bit on the player object every
+        # time a command is understood at all: `examine tree` moves nothing in
+        # the world and still changes `cretin`, so counting it would call
+        # looking at something progress. Measured rather than assumed —
+        # examining in Zork does not touch the thing examined, while opening a
+        # box sets its open bit and closing it clears the same bit again.
+        player = probe.player_object()
+        witnessed = any(c.num != player for c in changes)
+
         # Classify the turn before anything else reads the new state, so the
         # comparison is against the world as it was when the command was given.
         outcome = None
         if command:
-            outcome = self.outcomes.classify(command, obs, state, self._last_state)
+            outcome = self.outcomes.classify(
+                command, obs, state, self._last_state, witnessed=witnessed
+            )
             self.vocabulary.observe(command, outcome.outcome, obs.text)
 
         self._emit(
@@ -222,16 +245,6 @@ class Session:
             quality=self.outcomes.summary() if outcome else None,
         )
 
-        # Only changes the agent could have witnessed.
-        #
-        # The object tree is the whole world and it keeps moving without the
-        # player: Zork's thief wanders the dungeon from turn one, so an
-        # unfiltered delta announced his position every few turns to an agent
-        # who had never met him. That is the game's knowledge, not the run's.
-        changes = [
-            c for c in diff_objects(self._prev_objects, state.objects)
-            if c.num in visible
-        ]
         if changes:
             self._emit(
                 "object.delta",

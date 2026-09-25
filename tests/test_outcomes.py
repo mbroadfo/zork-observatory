@@ -55,52 +55,55 @@ class TestClassification:
         assert tally.classify("north", obs, after, before).outcome is Outcome.PROGRESS
 
 
-class TestTheHashIsNotTheOnlyWitness:
-    """The state hash covers the whole machine, including bookkeeping no
-    command caused. On the first turn of a Zork run it moves by itself, and an
-    identical "You can't see any leaflet here!" was read as progress on turn
-    one and as absent on turn two — which let a journal entry claiming a thing
-    had been taken pass a check whose entire job is to catch that."""
+class TestProgressIsWhatThePlayerCouldSee:
+    """The state hash was the obvious test for "did anything change" and the
+    wrong one. It covers the whole machine, so the game's own clock and dice
+    move it: `examine tree` on the Forest Path scored progress because a song
+    bird chirped, and a journal entry about a tree that had not changed was
+    kept on the strength of it. Four turns later `examine grating` scored
+    inert, because nothing ambient fired. Noisy, not always-wrong.
 
-    def _refused(self, text: str) -> Outcome:
+    What replaced it is the object tree filtered to what the agent can see —
+    the caller's `witnessed` — plus location, score and inventory.
+    """
+
+    def _turn(self, text: str, witnessed: bool = False, moved: bool = False,
+              command: str = "take leaflet") -> Outcome:
         from observatory.engine.base import Observation, WorldState
 
         before = WorldState(location_id=1, location_name="West of House",
                             score=0, state_hash="a", inventory=[])
-        after = WorldState(location_id=1, location_name="West of House",
-                           score=0, state_hash="b", inventory=[])   # hash moved
+        after = WorldState(location_id=2 if moved else 1,
+                           location_name="B" if moved else "West of House",
+                           score=0, state_hash="b", inventory=[])   # hash always moves
         obs = Observation(text=text, score=0, moves=1)
-        return OutcomeTally().classify("take leaflet", obs, after, before).outcome
+        return OutcomeTally().classify(
+            command, obs, after, before, witnessed=witnessed
+        ).outcome
 
-    def test_a_refusal_is_not_progress_just_because_the_hash_moved(self):
-        assert self._refused("You can't see any leaflet here!") is Outcome.ABSENT_NOUN
+    def test_a_moved_hash_alone_is_no_longer_progress(self):
+        assert self._turn("There's nothing special about the tree.",
+                          command="examine tree") is Outcome.INERT
 
-    def test_the_same_holds_for_unknown_words_and_bad_grammar(self):
-        assert self._refused('I don\'t know the word "above".') is Outcome.UNKNOWN_WORD
-        assert self._refused("That sentence isn't one I recognize.") is Outcome.GRAMMAR
+    def test_a_refusal_is_not_progress_however_the_hash_moved(self):
+        assert self._turn("You can't see any leaflet here!") is Outcome.ABSENT_NOUN
+        assert self._turn('I don\'t know the word "above".') is Outcome.UNKNOWN_WORD
+        assert self._turn("That sentence isn't one I recognize.") is Outcome.GRAMMAR
 
-    def test_a_hash_change_with_no_refusal_is_still_progress(self):
-        """Opening a mailbox moves nothing but the hash, and is real."""
-        from observatory.engine.base import Observation, WorldState
+    def test_something_the_player_could_see_change_is_progress(self):
+        """Opening a mailbox moves neither room, score nor inventory — the
+        mailbox itself changes, and that is visible."""
+        assert self._turn("Opening the small mailbox reveals a leaflet.",
+                          witnessed=True, command="open mailbox") is Outcome.PROGRESS
 
-        before = WorldState(location_id=1, location_name="West of House",
-                            score=0, state_hash="a", inventory=[])
-        after = WorldState(location_id=1, location_name="West of House",
-                           score=0, state_hash="b", inventory=[])
-        obs = Observation(text="Opening the small mailbox reveals a leaflet.", score=0, moves=1)
-        assert OutcomeTally().classify("open mailbox", obs, after, before).outcome is Outcome.PROGRESS
+    def test_going_somewhere_is_progress_without_any_object_moving(self):
+        assert self._turn("Forest Path", moved=True, command="north") is Outcome.PROGRESS
 
-    def test_a_real_change_outranks_a_refusal_shaped_reply(self):
-        """Location, score and inventory are specific enough to be believed
-        whatever the prose says."""
-        from observatory.engine.base import Observation, WorldState
-
-        before = WorldState(location_id=1, location_name="A", score=0,
-                            state_hash="a", inventory=[])
-        after = WorldState(location_id=2, location_name="B", score=0,
-                           state_hash="b", inventory=[])
-        obs = Observation(text='I don\'t know the word "above".', score=0, moves=1)
-        assert OutcomeTally().classify("north", obs, after, before).outcome is Outcome.PROGRESS
+    def test_the_thief_moving_out_of_sight_is_not_the_player_s_doing(self):
+        """`witnessed` arrives already filtered to what was in view, so the
+        classifier needs no opinion about which objects those were."""
+        assert self._turn("There's nothing special about the tree.",
+                          witnessed=False, command="examine tree") is Outcome.INERT
 
 
 class TestFutility:
