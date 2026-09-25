@@ -81,6 +81,12 @@ def normalized(text: str) -> str:
 # writing an essay every turn crowds its own transcript out of the window.
 MAX_ENTRY_CHARS = 200
 
+# Below this, a line is taken to be an acknowledgement rather than a claim, and
+# only the command beside it is compared. "Taken." is six characters and is
+# what Zork says every time anything is picked up; "Took the sack from the
+# table." is twenty-nine and says which thing.
+SELF_DESCRIBING_CHARS = 20
+
 # How many entries are shown. Forty is roughly two hundred turns of a player
 # writing only when something changed — the live runs classify about one turn
 # in four as PROGRESS — so in practice a whole game fits and the cap only
@@ -254,8 +260,16 @@ class Journal:
     def _already_said(self, entry: Entry) -> bool:
         said = normalized(entry.text)
         act = (entry.room.lower(), entry.command.lower())
+        # A line too short to name what it refers to is not a claim on its own,
+        # and the command beside it is what makes it one. The game answers
+        # every successful take with "Taken.", so matching on those six
+        # characters would keep the first thing a run picked up and refuse
+        # every other. Longer lines are matched: a model that writes "Took the
+        # sack from the table" on the turn it walks west has repeated itself
+        # whatever command it was holding at the time.
+        substantive = len(said) >= SELF_DESCRIBING_CHARS
         for kept in self.entries:
-            if normalized(kept.text) == said:
+            if substantive and normalized(kept.text) == said:
                 return True
             if act != ("", "") and (kept.room.lower(), kept.command.lower()) == act:
                 return True

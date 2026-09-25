@@ -79,10 +79,11 @@ class TestWriting:
     def test_the_same_line_twice_is_kept_once(self):
         """A model that writes one fact every turn would otherwise fill its own
         window with it — which is exactly what the notebook did across four
-        runs of light-source notes."""
+        runs of light-source notes. Long enough to name what it refers to, so
+        the line itself is the claim; see SELF_DESCRIBING_CHARS."""
         j = Journal()
-        kept(j, "The window opens.")
-        assert kept(j, "the WINDOW opens.", turn=9) is None
+        kept(j, "The window at the back of the house opens.")
+        assert kept(j, "the WINDOW at the BACK of the house opens.", turn=9) is None
         assert len(j) == 1
 
     def test_the_same_attempt_described_differently_is_kept_once(self):
@@ -147,6 +148,24 @@ class TestWhatIsTrueButNotWorthKeeping:
     def test_movement_can_be_kept_for_the_arm_that_wants_it(self):
         j = Journal(keep_movement=True)
         assert j.add("Moved north.", turn=5, outcome="progress", movement=True) is not None
+
+    def test_a_short_acknowledgement_is_not_a_repeat(self):
+        """Zork answers every successful take with "Taken.", so matching on
+        those six characters kept the first thing a run picked up and refused
+        every other. The command beside it is what makes it a claim."""
+        j = Journal()
+        assert j.add("Taken.", turn=4, room="Up a Tree", command="get egg",
+                     outcome="progress") is not None
+        assert j.add("Taken.", turn=9, room="Living Room", command="get lamp",
+                     outcome="progress") is not None
+        assert len(j) == 2
+
+    def test_a_substantive_line_repeated_is_still_a_repeat(self):
+        j = Journal()
+        j.add("Took the sack from the table.", turn=82, room="Kitchen",
+              command="take sack", outcome="progress")
+        assert j.add("Took the sack from the table.", turn=83, room="Kitchen",
+                     command="w", outcome="progress") is None
 
     def test_a_turn_stamp_no_longer_makes_a_repeat_look_new(self):
         """qwen3:14b wrote "Turn 82: Took the sack from the table." and then,
