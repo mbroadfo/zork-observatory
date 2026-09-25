@@ -191,6 +191,33 @@ class TestInARun:
         assert len(written) == 1
         assert written[0].payload["summary"]["count"] == 1
 
+    async def test_an_empty_journal_still_reports_as_present(self):
+        """An empty Journal is falsy, so `if agent.journal` is False before the
+        first entry — which reported a journal run as having none, and left the
+        front end hiding the panel until something was written."""
+        agent = OllamaAgent("qwen3:8b", transport=Journalling([]), journal=Journal())
+        bus = EventBus()
+        seen: list = []
+        bus.subscribe(seen.append)
+        session = Session(MockEngine(), agent, bus,
+                          config=SessionConfig(delay=0.0, max_turns=1))
+        await session.run()
+
+        assert session.summary()["journal"] == []
+        assert session.summary()["journal_summary"]["count"] == 0
+        started = next(e for e in seen if e.type == "session.started")
+        ended = next(e for e in seen if e.type == "session.ended")
+        assert started.payload["journal"] == []
+        assert ended.payload["journal"]["count"] == 0
+
+    async def test_a_player_without_one_reports_none_rather_than_empty(self):
+        agent = OllamaAgent("qwen3:8b", transport=Journalling([]))
+        session = Session(MockEngine(), agent, EventBus(),
+                          config=SessionConfig(delay=0.0, max_turns=1))
+        await session.run()
+        assert session.summary()["journal"] is None
+        assert session.summary()["journal_summary"] is None
+
     async def test_nothing_is_written_when_the_agent_writes_nothing(self):
         fake = Journalling([])
         agent = OllamaAgent("qwen3:8b", transport=fake, journal=Journal())

@@ -172,7 +172,7 @@ class Session:
             notebook=notebook,
             series=self.series,
             memory=self.agent.memory.to_dict(),
-            journal=self.agent.journal.to_dict() if self.agent.journal else None,
+            journal=self.agent.journal.to_dict() if self.agent.journal is not None else None,
         )
         self._ingest(command="", obs=obs, state=state)
         await self.agent.on_start(obs.text)
@@ -604,7 +604,7 @@ class Session:
             deaths=self.deaths,
             lives_used=self.life,
             memory=self.agent.memory.to_dict(),
-            journal=self.agent.journal.summary() if self.agent.journal else None,
+            journal=self.agent.journal.summary() if self.agent.journal is not None else None,
             turns=self.turn,
             steps=self.steps,
             final_score=state.score if state else 0,
@@ -695,8 +695,8 @@ class Session:
             "life": self.life,
             "lives_left": self.lives_left,
             "memory": self.agent.memory.to_dict(),
-            "journal": self.agent.journal.to_dict() if self.agent.journal else None,
-            "journal_summary": self.agent.journal.summary() if self.agent.journal else None,
+            "journal": self.agent.journal.to_dict() if self.agent.journal is not None else None,
+            "journal_summary": self.agent.journal.summary() if self.agent.journal is not None else None,
             "notebook": self.notebook.summary() if self.notebook else None,
             "run_number": self.run_number,
             "series": self.series,
