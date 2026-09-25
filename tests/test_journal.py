@@ -128,8 +128,54 @@ class TestTheFilter:
             j.add(f"false {i}", turn=2 + i, outcome="futile")
         s = j.summary()
         assert (s["count"], s["attempted"], s["rejected"]) == (1, 10, 9)
-        assert s["corroborated_pct"] == 10.0
-        assert s["rejected_outcomes"] == {"futile": 9}
+        assert s["truthful_pct"] == 10.0
+        assert s["false_outcomes"] == {"futile": 9}
+
+
+class TestWhatIsTrueButNotWorthKeeping:
+    """Three reasons to refuse, and only one of them is about the model being
+    wrong. Counting them together made a run that repeated itself look like a
+    run that was inventing."""
+
+    def test_going_somewhere_is_real_change_the_map_already_holds(self):
+        j = Journal()
+        assert j.add("Moved north from the forest path.", turn=5,
+                     outcome="progress", movement=True) is None
+        assert j.rejected[0].reason == "movement"
+        assert j.summary()["movement"] == 1
+
+    def test_movement_can_be_kept_for_the_arm_that_wants_it(self):
+        j = Journal(keep_movement=True)
+        assert j.add("Moved north.", turn=5, outcome="progress", movement=True) is not None
+
+    def test_a_turn_stamp_no_longer_makes_a_repeat_look_new(self):
+        """qwen3:14b wrote "Turn 82: Took the sack from the table." and then,
+        on the turn it walked west, the same sentence stamped "Turn 83:". Both
+        turns changed something, so only the repeat check could catch it."""
+        j = Journal()
+        j.add("Turn 82: Took the sack from the table.", turn=82,
+              room="Kitchen", command="take sack", outcome="progress")
+        assert j.add("Turn 83: Took the sack from the table.", turn=83,
+                     room="Kitchen", command="w", outcome="progress") is None
+        assert j.rejected[0].reason == "redundant"
+
+    def test_the_line_is_stored_exactly_as_written(self):
+        """The stamp is stripped to compare, never to store. What a model
+        chose to say is the datum."""
+        j = Journal()
+        entry = j.add("Turn 82: Took the sack.", turn=82, outcome="progress")
+        assert entry is not None and entry.text == "Turn 82: Took the sack."
+
+    def test_true_but_dropped_still_counts_as_truthful(self):
+        j = Journal()
+        j.add("Opened it.", turn=1, room="Hall", command="open door", outcome="progress")
+        j.add("Moved north.", turn=2, outcome="progress", movement=True)
+        j.add("Opened it.", turn=3, room="Hall", command="open door", outcome="progress")
+        j.add("Solved it.", turn=4, outcome="futile")
+
+        s = j.summary()
+        assert (s["count"], s["movement"], s["redundant"], s["false"]) == (1, 1, 1, 1)
+        assert s["truthful"] == 3 and s["truthful_pct"] == 75.0
 
 
 class TestReadingBack:
@@ -167,15 +213,18 @@ class TestCorroboration:
             "count": 2,
             "attempted": 4,
             "rejected": 2,
-            "corroborated": 2,
-            "corroborated_pct": 50.0,
+            "truthful": 2,
+            "truthful_pct": 50.0,
+            "false": 2,
+            "redundant": 0,
+            "movement": 0,
             "outcomes": {"progress": 2},
-            "rejected_outcomes": {"inert": 1, "futile": 1},
+            "false_outcomes": {"inert": 1, "futile": 1},
             "filtered": True,
         }
 
     def test_an_empty_journal_does_not_divide_by_zero(self):
-        assert Journal().summary()["corroborated_pct"] == 0.0
+        assert Journal().summary()["truthful_pct"] == 0.0
 
 
 class TestThePrompt:
@@ -234,7 +283,9 @@ class TestThePrompt:
 class TestInARun:
     async def test_an_entry_is_filed_with_the_engine_s_verdict_on_that_turn(self):
         fake = Journalling(["Walked north out of the field."], command="north")
-        agent = OllamaAgent("qwen3:8b", transport=fake, journal=Journal())
+        # keep_movement, because this is about the verdict riding along with
+        # the entry, not about which entries are worth keeping.
+        agent = OllamaAgent("qwen3:8b", transport=fake, journal=Journal(keep_movement=True))
         bus = EventBus()
         seen: list = []
         bus.subscribe(seen.append)
@@ -272,10 +323,23 @@ class TestInARun:
         assert refused[0].payload["summary"]["attempted"] == 1
         assert not [e for e in seen if e.type == "journal.written"]
 
+    async def test_movement_entries_are_refused_in_a_real_run(self, tmp_path):
+        fake = Journalling(["Moved north out of the field."], command="north")
+        agent = OllamaAgent("qwen3:8b", transport=fake, journal=Journal())
+        session = Session(MockEngine(), agent, EventBus(),
+                          config=SessionConfig(delay=0.0, max_turns=2))
+        await session.run()
+
+        assert len(agent.journal) == 0
+        assert agent.journal.rejected[0].reason == "movement"
+        # Still truthful: it did move. The map simply already knows.
+        assert agent.journal.summary()["truthful_pct"] == 100.0
+
     async def test_the_notebook_keeps_only_what_survived(self, tmp_path):
         fake = Journalling(["Walked north.", "Opened the mailbox."])
         fake.command = "north"
-        agent = OllamaAgent("qwen3:8b", transport=fake, journal=Journal())
+        agent = OllamaAgent("qwen3:8b", transport=fake,
+                            journal=Journal(keep_movement=True))
         book = Notebook.open(tmp_path, "story", agent.name)
         session = Session(MockEngine(), agent, EventBus(),
                           config=SessionConfig(delay=0.0, max_turns=2), notebook=book)

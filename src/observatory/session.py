@@ -26,7 +26,7 @@ from .trace import TraceWriter
 from .world.coverage import Coverage
 from .world.discovery import DiscoveryLedger, Turn as DiscoveryTurn
 from .world.frontier import structure as map_structure
-from .world.graph import MapGraph
+from .world.graph import MapGraph, parse_movement
 from .world.outcomes import OutcomeTally
 from .world.vocabulary import Vocabulary
 from .world.objects import build_tree, diff_objects, name_for
@@ -314,6 +314,11 @@ class Session:
                 command=command,
                 outcome=outcome.outcome.value if outcome else "",
                 run=self.run_number,
+                # Going somewhere is real change, and the map already has it —
+                # every room, every passage, in more detail and without the
+                # mistakes. Told here rather than worked out in agents/,
+                # which does not import from world/.
+                movement=parse_movement(command) is not None,
             )
             if entry is not None:
                 if self.notebook:

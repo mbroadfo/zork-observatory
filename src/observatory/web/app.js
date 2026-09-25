@@ -69,7 +69,7 @@ const state = {
   discoveriesSeen: new Set(),
   memory: [],              // lessons the agent kept across rollbacks
   journal: null,           // entries the world bore out; null = no journal
-  journalAttempted: 0,     // including the ones it refused, which is the point
+  journalSummary: null,    // kept, offered, truthful, and why the rest went
   occupied: new Set(),     // "col,row" lattice cells, so rooms never stack
   showBlocked: false,      // walls are clutter by default; they outnumber edges 2:1
   current: null,
@@ -874,16 +874,16 @@ function renderJournal(entries) {
   }
   section.style.display = "";
   const el = $("s-journal");
-  // Kept against offered, not kept against kept: every surviving entry is
-  // corroborated by construction, so a rate over survivors would always read
-  // 100% however much fiction the model wrote.
-  const attempted = state.journalAttempted || entries.length;
-  $("j-count").textContent = attempted
-    ? `${entries.length}/${attempted} kept`
+  // Kept, and how truthful the whole of what it wrote was. The second number
+  // counts lines refused for repeating themselves or for being about movement
+  // — those were true — so it measures the model rather than the filter.
+  const s = state.journalSummary || {};
+  $("j-count").textContent = s.attempted
+    ? `${entries.length} kept · ${s.truthful_pct}% truthful of ${s.attempted}`
     : "";
   if (!entries.length) {
-    el.innerHTML = attempted
-      ? `<li class="empty">${attempted} claim(s) written, none the world bore out</li>`
+    el.innerHTML = s.attempted
+      ? `<li class="empty">${s.attempted} claim(s) written, none kept</li>`
       : '<li class="empty">nothing written down yet</li>';
     return;
   }
@@ -1038,7 +1038,7 @@ function handle(event) {
     case "journal.written":
       if (!state.journal) state.journal = [];
       state.journal.push(p);
-      state.journalAttempted = (p.summary || {}).attempted || state.journal.length;
+      state.journalSummary = p.summary || {};
       renderJournal(state.journal);
       note(`✎ journal: ${p.text}`);
       break;
@@ -1047,12 +1047,17 @@ function handle(event) {
       // Refused, and shown. The entry is not kept and the agent never reads
       // it back, but a claim made on a turn where nothing happened is the
       // most legible sign a run has stopped getting anywhere.
-      state.journalAttempted = (p.summary || {}).attempted || 0;
+      state.journalSummary = p.summary || {};
       renderJournal(state.journal || []);
-      note(
-        `✎ ✗ not kept — “${p.text}” but the turn was ${p.outcome}, nothing changed`,
-        true
-      );
+      // Only a false claim is worth interrupting the transcript for. A line
+      // dropped for repeating itself, or for being about a move the map
+      // already holds, was true and says nothing about the player.
+      if (p.reason === "uncorroborated") {
+        note(
+          `✎ ✗ not kept — “${p.text}” but the turn was ${p.outcome}, nothing changed`,
+          true
+        );
+      }
       break;
 
     case "run.restored":
@@ -1150,7 +1155,7 @@ function resetView() {
   state.discoveriesSeen.clear();
   state.memory = [];
   state.journal = null;
-  state.journalAttempted = 0;
+  state.journalSummary = null;
   state.occupied.clear();
   renderCheckpoints([]);
   renderDiscoveries([]);
@@ -1256,7 +1261,7 @@ function applySummary(s) {
   if ((s.memory || []).length >= state.memory.length) state.memory = s.memory || [];
   renderMemory(state.memory);
   if (s.journal) state.journal = s.journal;
-  if (s.journal_summary) state.journalAttempted = s.journal_summary.attempted || 0;
+  if (s.journal_summary) state.journalSummary = s.journal_summary;
   renderJournal(state.journal);
   renderQuality(s.quality);
   renderCoverage(s.coverage);

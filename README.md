@@ -209,17 +209,44 @@ engine classified `futile`, then spent forty turns trying to take the grating
 it had just recorded taking.
 
 **A model writes its most confident fiction exactly when it is stuck**, and an
-unfiltered journal feeds that straight back to it as established fact. So the
-rate reported is of everything offered, never of what survived — filtering must
-not be allowed to flatter itself — and it doubles as a live stuck-detector,
-sitting near 100% while a run is getting somewhere and collapsing the moment it
-is not.
+unfiltered journal feeds that straight back to it as established fact.
 
-One limitation, stated rather than buried: a turn that only reveals
+Two further refusals, for lines that are true and still not worth carrying.
+**Movement**: going somewhere is real change and passes the test above, but the
+map already holds every room and passage in more detail — of the first
+twenty-eight entries one run kept, sixteen were *"Moved north from the forest
+path"* and its variants, crowding out the eight that said anything the map does
+not. **Repetition**: the same act gets written several ways, and a model will
+copy the previous line verbatim onto the next turn, so the check matches on
+`(room, command)` as well as on the words with any `Turn 82:` stamp removed.
+
+That makes three numbers where there was one, because they answer different
+questions and a single figure answered none of them honestly:
+
+```text
+truthful_pct   of everything offered, how much the world bore out — counting
+               the lines dropped for repetition or movement, which were true.
+               Always over what was offered, never over what survived: every
+               kept entry is corroborated by construction, so a rate over
+               survivors would read 100% however much fiction was written.
+false          claims about turns where nothing happened. The live
+               stuck-detector: near zero while a run is getting somewhere,
+               the bulk of the traffic once it is not.
+redundant
+movement       true, and dropped anyway. Not a fault in the model — the
+               record refusing to fill up with what it already holds.
+```
+
+Two limitations, stated rather than buried. A turn that only reveals
 information — reading a leaflet, examining a thing — changes no state, so it is
-classified `inert` and refused, however worth remembering it was.
-`Journal(corroborated_only=False)` keeps the unfiltered behaviour for the arm
-that measures it.
+`inert` and refused however worth remembering it was. And corroboration checks
+that *the turn* changed something, not that *the sentence* describes that
+change: one run walked west and wrote "Took the sack from the table", which is
+progress and a lie at the same time. The repetition check catches that
+particular shape of it; nothing catches the general case.
+
+`Journal(corroborated_only=False)` and `Journal(keep_movement=True)` restore
+the earlier behaviours for the arms that measured them.
 
 It is off by default, because a player that keeps no journal is the control arm
 for one that does, and that is the arm the sweep actually measured. The prompt

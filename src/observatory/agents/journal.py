@@ -56,9 +56,26 @@ summary substituted for the raw text is worse than no summary at all.
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import asdict, dataclass, field
 from typing import Any
+
+# Models like to stamp the turn on the front of the line. Harmless in itself,
+# and fatal to a check for repetition: qwen3:14b wrote "Turn 82: Took the sack
+# from the table." and then, on the turn it walked west, "Turn 83: Took the
+# sack from the table." — the same sentence, kept because the prefix differed.
+_TURN_PREFIX = re.compile(r"^\s*turn\s+\d+\s*[:.–—-]\s*", re.IGNORECASE)
+
+
+def normalized(text: str) -> str:
+    """A line reduced to what it actually claims, for comparison only.
+
+    The stored entry stays exactly as the agent wrote it. What a model chose
+    to say is the datum and is never edited; this is just the key it is
+    compared under.
+    """
+    return _TURN_PREFIX.sub("", text or "").strip().lower()
 
 # One line, not a paragraph. The cap is the same guard as a lesson's: a model
 # writing an essay every turn crowds its own transcript out of the window.
@@ -76,6 +93,15 @@ DEFAULT_SHOWN = 40
 CORROBORATING = ("progress",)
 
 
+# Why an offered line was not kept. Only the first is a claim about the world
+# being wrong; the other two are true things not worth carrying, and lumping
+# them together would make a model look like it was inventing when it was
+# repeating itself.
+UNCORROBORATED = "uncorroborated"   # the turn changed nothing
+MOVEMENT = "movement"               # true, but the map already records it
+REDUNDANT = "redundant"             # true, and already written down
+
+
 @dataclass
 class Entry:
     """One line the agent chose to keep, and what the engine made of the turn."""
@@ -88,11 +114,24 @@ class Entry:
     # session once the command has run. "" when nothing classified it.
     outcome: str = ""
     run: int = 0
+    # Empty when the entry was kept; otherwise why it was not.
+    reason: str = ""
     ts: float = field(default_factory=time.time)
 
     @property
     def corroborated(self) -> bool:
         return self.outcome in CORROBORATING
+
+    @property
+    def truthful(self) -> bool:
+        """The world bore this turn out, whether or not the line was kept.
+
+        A line dropped for repeating itself was still true, and counting it as
+        fiction would understate the model badly: of the first hundred and
+        twenty-one lines one run offered, ten were refused for saying again
+        what it had already said.
+        """
+        return self.reason != UNCORROBORATED and self.corroborated
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -121,13 +160,19 @@ class Journal:
     the grating it had just recorded taking.
     """
 
-    def __init__(self, shown: int = DEFAULT_SHOWN, corroborated_only: bool = True) -> None:
+    def __init__(
+        self,
+        shown: int = DEFAULT_SHOWN,
+        corroborated_only: bool = True,
+        keep_movement: bool = False,
+    ) -> None:
         self.entries: list[Entry] = []
         # Written, then refused. Kept for the count and the trace; never shown
         # to the agent and never written to the notebook.
         self.rejected: list[Entry] = []
         self.shown = shown
         self.corroborated_only = corroborated_only
+        self.keep_movement = keep_movement
 
     def __len__(self) -> int:
         return len(self.entries)
@@ -138,24 +183,31 @@ class Journal:
 
     def add(
         self, text: str, turn: int, room: str = "", command: str = "",
-        outcome: str = "", run: int = 0,
+        outcome: str = "", run: int = 0, movement: bool = False,
     ) -> Entry | None:
         """Offer one line. Returns the entry if it was kept, None if not.
 
-        Three ways to be refused, in order:
+        Four ways to be refused, in order:
 
-          Nothing was written, so there is nothing to keep.
+          Nothing was written, so there is nothing to keep. Not counted as an
+          attempt either — the field was simply left out.
 
-          The world did not change on this turn. A record of what a player
-          did is only worth reading back if the things in it happened, and a
-          model that is stuck writes its most confident fiction — so the turn
-          that produced the line is what decides, not the line.
+          The world did not change on this turn. A record is only worth
+          reading back if the things in it happened, and a model that is stuck
+          writes its most confident fiction — so the turn that produced the
+          line decides, not the line.
 
-          It says something already written. A model that repeats one fact
-          every turn would fill its own window with it, which is the shape the
-          notebook's light-source spiral took over four runs. Matched on the
-          room and command as well as the words, because the same failed
-          attempt gets described four different ways.
+          It is about going somewhere. Movement is real change and it passes
+          the test above, but the map already holds every room and every
+          passage, in more detail and without the mistakes: of the first
+          twenty-eight entries one run kept, sixteen were "Moved north from
+          the forest path" and its variants, crowding out the eight that said
+          anything the map does not.
+
+          It says something already written. Matched on the room and command
+          as well as the words, because the same act gets described several
+          ways — and matched on the words with any "Turn 82:" stamp removed,
+          because otherwise the same sentence on the next turn is a new one.
         """
         text = " ".join((text or "").split())[:MAX_ENTRY_CHARS].strip()
         if not text:
@@ -165,18 +217,24 @@ class Journal:
             outcome=outcome, run=run,
         )
         if self.corroborated_only and not entry.corroborated:
-            self.rejected.append(entry)
-            return None
+            return self._refuse(entry, UNCORROBORATED)
+        if movement and not self.keep_movement:
+            return self._refuse(entry, MOVEMENT)
         if self._already_said(entry):
-            self.rejected.append(entry)
-            return None
+            return self._refuse(entry, REDUNDANT)
         self.entries.append(entry)
         return entry
 
+    def _refuse(self, entry: Entry, reason: str) -> None:
+        entry.reason = reason
+        self.rejected.append(entry)
+        return None
+
     def _already_said(self, entry: Entry) -> bool:
+        said = normalized(entry.text)
         act = (entry.room.lower(), entry.command.lower())
         for kept in self.entries:
-            if kept.text.lower() == entry.text.lower():
+            if normalized(kept.text) == said:
                 return True
             if act != ("", "") and (kept.room.lower(), kept.command.lower()) == act:
                 return True
@@ -205,32 +263,57 @@ class Journal:
         return [entry.to_dict() for entry in self.entries]
 
     def summary(self) -> dict[str, Any]:
-        """What was kept, what was offered, and what the refused ones claimed.
+        """What was kept, what was offered, and why the rest was not.
 
-        `corroborated_pct` is of everything the agent tried to write, not of
-        what survived — filtering must not be allowed to flatter itself. With
-        the filter on it is the share of the agent's claims that were true,
-        which is the figure worth watching: in the runs measured so far it
-        sits near 100% while a run is getting somewhere and collapses to zero
-        the moment it starts pushing at something that will not move.
+        Three numbers that used to be one, because they answer different
+        questions and the single number answered none of them honestly:
+
+          truthful_pct  of everything offered, how much the world bore out.
+                        This is the measure of the model, and it counts lines
+                        refused for repetition or for being about movement —
+                        those were true. Reported over what was offered and
+                        never over what survived: every kept entry is
+                        corroborated by construction, so a rate over survivors
+                        would read 100% however much fiction was written.
+
+          false         lines written about turns where nothing happened. The
+                        live stuck-detector: near zero while a run is getting
+                        somewhere, and the bulk of the traffic once it is not.
+
+          redundant / movement
+                        true, and dropped anyway. High numbers here are not a
+                        fault in the model, they are the record refusing to
+                        fill up with what it already holds.
         """
-        kept = len(self.entries)
         attempted = self.attempted
-        agreed = sum(1 for e in self.entries if e.corroborated)
-        refused: dict[str, int] = {}
+        reasons: dict[str, int] = {}
         for entry in self.rejected:
-            refused[entry.outcome or "unclassified"] = refused.get(entry.outcome or "unclassified", 0) + 1
+            reasons[entry.reason] = reasons.get(entry.reason, 0) + 1
+        refused_outcomes: dict[str, int] = {}
+        for entry in self.rejected:
+            if entry.reason == UNCORROBORATED:
+                refused_outcomes[entry.outcome or "unclassified"] = (
+                    refused_outcomes.get(entry.outcome or "unclassified", 0) + 1
+                )
         outcomes: dict[str, int] = {}
         for entry in self.entries:
             if entry.outcome:
                 outcomes[entry.outcome] = outcomes.get(entry.outcome, 0) + 1
+
+        truthful = (
+            sum(1 for e in self.entries if e.corroborated)
+            + sum(1 for e in self.rejected if e.truthful)
+        )
         return {
-            "count": kept,
+            "count": len(self.entries),
             "attempted": attempted,
             "rejected": len(self.rejected),
-            "corroborated": agreed,
-            "corroborated_pct": round(100 * agreed / attempted, 1) if attempted else 0.0,
+            "truthful": truthful,
+            "truthful_pct": round(100 * truthful / attempted, 1) if attempted else 0.0,
+            "false": reasons.get(UNCORROBORATED, 0),
+            "redundant": reasons.get(REDUNDANT, 0),
+            "movement": reasons.get(MOVEMENT, 0),
             "outcomes": outcomes,
-            "rejected_outcomes": refused,
+            "false_outcomes": refused_outcomes,
             "filtered": self.corroborated_only,
         }
