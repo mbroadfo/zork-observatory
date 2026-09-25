@@ -157,7 +157,12 @@ Write in the journal when something you did changed the world — something \
 opened, something taken, a way that turned out to be passable. Record what you \
 did and where, in the words the game used, rather than what you concluded from \
 it. You will read these back as established fact, so a guess written down \
-becomes something you believe next time."""
+becomes something you believe next time.
+
+Say what had to be true first. Where you were standing, what you were already \
+holding, what you had already opened. A note that keeps the result and loses \
+the condition will send you back to repeat it somewhere it cannot work, and \
+you will not be able to tell why it is failing."""
 
 
 def with_journal(level: str) -> str:

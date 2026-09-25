@@ -84,9 +84,20 @@ class TestTheJournalSplitsAlongTheSameLine:
     def test_only_coached_is_told_what_to_write(self):
         for level in CLEAN:
             text = prompts.with_journal(level).lower()
-            for idea in ["changed the world", "opened", "taken", "established fact"]:
+            for idea in ["changed the world", "opened", "taken", "established fact",
+                         "had to be true first"]:
                 assert idea not in text, f"{level!r} leaks journal coaching: {idea!r}"
         assert "changed the world" in prompts.with_journal("coached").lower()
+
+    def test_coached_asks_for_the_condition_as_well_as_the_result(self):
+        """A record of results alone is a cheat sheet with no route. One run
+        carried "Took the elvish sword from above the trophy case" and typed it
+        at a parser that has no word "above"; another read a journal that never
+        mentioned a lamp and walked into the dark certain it needed none."""
+        text = prompts.with_journal("coached").lower()
+        assert "had to be true first" in text
+        for idea in ["where you were standing", "already holding", "already opened"]:
+            assert idea in text
 
     def test_cold_still_does_not_reveal_that_it_is_a_game_or_has_a_parser(self):
         cold = prompts.with_journal("cold").lower()
