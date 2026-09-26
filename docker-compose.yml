@@ -18,8 +18,14 @@ services:
       # Live-edit the source without rebuilding.
       - ./src:/app/src
     environment:
-      # Read from the host shell; leave unset to run the free agents only.
+      # Read from a .env file beside this one, or from the shell you bring the
+      # stack up from. Leave unset to run the free players only — everything
+      # except `claude` works without it. See .env.example.
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # Alternatives for the same purpose: an OAuth bearer token, or a gateway
+      # standing in for the API. Both are honoured by the SDK on their own.
+      - ANTHROPIC_AUTH_TOKEN=${ANTHROPIC_AUTH_TOKEN:-}
+      - ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL:-}
       # The local model server below. To use an Ollama installed on the host
       # instead, set OLLAMA_HOST=http://host.docker.internal:11434.
       - OLLAMA_HOST=${OLLAMA_HOST:-http://ollama:11434}

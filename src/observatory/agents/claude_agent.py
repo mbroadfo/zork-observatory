@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import time
 from typing import Any
 
@@ -54,6 +55,18 @@ NO_EFFORT_PREFIXES = ("claude-haiku-",)
 
 def takes_effort(model: str) -> bool:
     return not model.startswith(NO_EFFORT_PREFIXES)
+
+
+# Either of these lets the SDK authenticate on its own; a gateway may need
+# neither. Checked by name rather than by trying a call, so the common mistake
+# — no key in the container's environment — is reported as itself.
+KEY_VARS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+
+NO_KEY = """no Anthropic credentials. The observatory reads ANTHROPIC_API_KEY \
+from the environment it was started in — put it in a .env file beside \
+docker-compose.yml (it is gitignored) or export it in the shell you bring the \
+stack up from, then restart. Everything except the `claude` player works \
+without one."""
 
 
 def output_config(model: str, effort: str, fmt: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -105,6 +118,9 @@ class ClaudeAgent(Agent):
             else prompts.get(info_level)
         )
         self.name = f"claude:{model}" + ("" if info_level == DEFAULT_INFO_LEVEL else f"/{info_level}")
+        # A key passed in beats the environment; either way preflight has to
+        # know which it is before it decides there are no credentials at all.
+        self._explicit_key = api_key
         self._client = anthropic.AsyncAnthropic(api_key=api_key) if api_key else anthropic.AsyncAnthropic()
         self._totals = {
             "input_tokens": 0,
@@ -114,6 +130,44 @@ class ClaudeAgent(Agent):
             "calls": 0,
             "latency_ms_total": 0.0,
         }
+
+    async def preflight(self) -> str | None:
+        """Why this run cannot start, or None.
+
+        Asked once, before turn one. Without it an unauthenticated client fails
+        inside `act`, and the failure arrives as a crashed session on turn 1 —
+        or, on the paths that swallow an API error and play `look`, as a run
+        that looks like a very bad player rather than a missing key.
+
+        The live call is one token against the model that was actually asked
+        for, which is the only way to catch a key that exists but is wrong, a
+        model this account cannot reach, or a gateway that is not answering.
+        It costs a fraction of a cent and saves a run.
+        """
+        import anthropic
+
+        key = self._explicit_key or next(
+            (os.environ[v] for v in KEY_VARS if os.environ.get(v)), None
+        )
+        if not key and not os.environ.get("ANTHROPIC_BASE_URL"):
+            return NO_KEY
+        try:
+            await self._client.messages.create(
+                model=self.model,
+                max_tokens=1,
+                messages=[{"role": "user", "content": "hi"}],
+            )
+        except anthropic.APIStatusError as exc:
+            if exc.status_code in (401, 403):
+                return f"the Anthropic API refused these credentials ({exc.status_code}): {exc.message}"
+            if exc.status_code == 404:
+                return f"model {self.model!r} is not available to this account: {exc.message}"
+            return f"the Anthropic API returned {exc.status_code}: {exc.message}"
+        except anthropic.APIConnectionError as exc:
+            return f"cannot reach the Anthropic API: {exc}"
+        except Exception as exc:   # an SDK that cannot even build the request
+            return f"{type(exc).__name__}: {exc}"
+        return None
 
     # --- prompt ----------------------------------------------------------
 

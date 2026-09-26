@@ -116,10 +116,33 @@ observatory play --engine jericho --rom roms/zork1.z5 --agent scripted
 
 ### Playing with Claude
 
+This is the one player that needs a credential. Metered API usage, separate from
+any Claude subscription — a key from
+[the console](https://console.anthropic.com/settings/keys):
+
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...        # or: ant auth login
+cp .env.example .env        # then paste the key in; .env is gitignored
+docker compose up           # Compose reads .env on its own
+```
+
+Or from a shell, without Docker:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
 observatory play --agent claude --turns 40 --trace traces/run.jsonl
 ```
+
+`ANTHROPIC_AUTH_TOKEN` (a bearer token) and `ANTHROPIC_BASE_URL` (a gateway
+standing in for the API) work instead, and are passed through to the container.
+
+The credential is checked **before turn one**, with a one-token request to the
+model actually selected. Without that check an unauthenticated client fails
+inside the first turn — the SDK does not complain when it is built, only when it
+is used — and the run dies on turn 1 with an SDK `TypeError` where "no key"
+should be. A wrong key, a model the account cannot reach and an unreachable API
+are each named as themselves. Nothing else in the observatory needs any of this:
+the local models, both baselines, human play and every replay work with no key
+at all.
 
 The agent sees the transcript and nothing else — no object tree, no valid-action
 list, no walkthrough. `--effort` (default `medium`) and `--history-turns`
