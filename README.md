@@ -636,6 +636,44 @@ observatory play ... --agent ollama --model qwen3:8b --runs 5 --notebook new
 In the browser the same options are the **runs** and **notebook** selectors.
 Chained runs start on their own after a two-second pause.
 
+### Handing the keyboard over, mid-run
+
+**⇄ Hand over** gives the game in progress to whoever the pickers at the top are
+set to. The world does not move: same engine, same room, same score, same
+inventory, same discovered map. The only thing that changes is what gets asked
+for the next command. It works in both directions — open the house yourself and
+let a local model take it underground, or take the keyboard back from a run that
+has spent forty turns typing `look`.
+
+```bash
+curl -XPOST localhost:8000/api/handoff -H 'content-type: application/json' \
+  -d '{"agent":"ollama","model":"qwen3:8b","inherit_transcript":false,"add_turns":300}'
+```
+
+The interesting switch is **takes over**, `inherit_transcript` on the API:
+
+- *reading the transcript* — the incoming player is shown the last N exchanges
+  it did not play. After a human, this is the strongest coaching anywhere in
+  this repository: expert moves, in the game's own words, on this exact world.
+  It is a demonstration, not a measurement.
+- *cold, this room only* — it is told where it is standing and nothing else. No
+  record of how anyone got there. This is the version comparable with a normal
+  run, and the one worth watching: it asks whether a model can make progress
+  from a strong position, which is a different question from whether it can
+  reach one.
+
+Either way, **a score that spans a handoff is not either player's score**. The
+trace carries a `run.handoff` event and every summary carries a `handoffs` list
+for exactly that reason: whatever is being read later, it can tell which turns
+belonged to whom. The walkthrough cannot take over — it starts at the first move
+of a fresh game, so from turn 83 it would be a command list for a world that
+moved on, and the route refuses it.
+
+The turn that was waiting when you hand over is not counted. The loop parks
+inside the player's `act`, before anything reaches the engine — a human who has
+not typed yet, or a model call nobody will read now — so cancelling there costs
+an inference and no world state.
+
 ### Rewinding doesn't erase knowledge
 
 `Session.rewind()` restores the world to a checkpoint but leaves the map intact.

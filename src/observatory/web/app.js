@@ -1070,6 +1070,18 @@ function handle(event) {
       );
       break;
 
+    case "run.handoff":
+      $("r-turn").textContent = p.turn;
+      note(
+        `⇄ ${p.from_agent} → ${p.agent} at turn ${p.turn}, ${p.score} point(s), ` +
+          `in ${p.room || "the dark"} · ` +
+          (p.inherits
+            ? "reading the transcript it did not play"
+            : "cold — this room and nothing else") +
+          ". Everything after this line belongs to " + p.agent
+      );
+      break;
+
     case "map.update": {
       if (p.new_room) {
         state.rooms.set(p.new_room.id, { ...p.new_room, placed: false });
@@ -1271,6 +1283,10 @@ function applySummary(s) {
     tokensOut = s.usage.output_tokens || 0;
     showTokens();
   }
+  // Once a game is live, who may type is a fact about the session rather than
+  // about the pickers — a handoff can put a human at a keyboard that was a
+  // model's a moment ago, or take one away.
+  if (s.started) $("input-row").classList.toggle("on", s.agent_kind === "human");
   if (s.usage && s.usage.cost_usd) {
     costTotal = s.usage.cost_usd;
     $("r-cost").textContent = `$${costTotal.toFixed(costTotal < 1 ? 4 : 2)}`;
@@ -1287,6 +1303,7 @@ function setRunning(running, finished) {
   $("pause").disabled = !running;
   $("step").disabled = running || finished;
   $("mark").disabled = !state.session || finished;
+  $("handover").disabled = !state.session || !state.session.started || finished;
 }
 
 function syncAgentControls() {
@@ -1396,6 +1413,33 @@ $("mark").onclick = async () => {
     note(`⚑ checkpoint ${r.label} — the world can be restored here`);
     applySummary(r.session);
   }
+};
+
+// Hand the live game to whoever the pickers above are set to. The agent,
+// model, thinking and journal controls mean the same thing here as they do for
+// a new run — the difference is that the world is already somewhere.
+$("handover").onclick = async () => {
+  const s = state.session;
+  if (!s) return;
+  const agent = $("agent").value;
+  const llm = ["claude", "ollama"].includes(agent);
+  const inherits = $("inherit").value === "1";
+  const r = await post("/api/handoff", {
+    agent,
+    model: agent === "ollama" ? $("omodel").value : $("model").value,
+    effort: $("effort").value,
+    think: $("think").value,
+    info_level: $("info").value,
+    num_ctx: parseInt($("numctx").value, 10) || 16384,
+    temperature: parseFloat($("temp").value),
+    history_turns: 30,
+    journal: llm && $("journal").value === "on",
+    notebook: llm ? $("notebook").value : "off",
+    inherit_transcript: inherits,
+    add_turns: parseInt($("turns").value, 10) || 200,
+    delay: 0.35,
+  });
+  if (r && r.session) applySummary(r.session);
 };
 
 async function sendCommand() {

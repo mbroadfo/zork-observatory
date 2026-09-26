@@ -14,6 +14,7 @@ counterfactual exploration.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import uuid
 from dataclasses import dataclass
 from typing import Any
@@ -30,6 +31,11 @@ from .world.graph import MapGraph, parse_movement
 from .world.outcomes import OutcomeTally
 from .world.vocabulary import Vocabulary
 from .world.objects import build_tree, diff_objects, name_for
+
+
+# How many more turns a takeover gets when nobody says. A handoff usually
+# happens at the end of a budget someone set for a different player.
+HANDOFF_TURNS = 200
 
 
 @dataclass
@@ -134,6 +140,13 @@ class Session:
         # What the agent asked to write down this turn, held until the command
         # has run so the entry can be filed with the engine's verdict on it.
         self._pending_journal: str = ""
+        # Who has played, and from which turn. Empty for the ordinary case of
+        # one player for one run.
+        self.handoffs: list[dict[str, Any]] = []
+        # Where the current player's view of the transcript begins. Nonzero
+        # only after a handoff that deliberately withheld its predecessor's
+        # play; the observatory's own record is never trimmed.
+        self._agent_floor = 0
         self._prev_objects: list = []
         self._prev_room_id: str | None = None
         self._last_state: WorldState | None = None
@@ -176,6 +189,126 @@ class Session:
         )
         self._ingest(command="", obs=obs, state=state)
         await self.agent.on_start(obs.text)
+
+    async def handoff(
+        self,
+        agent: Agent,
+        *,
+        inherit_transcript: bool = True,
+        notebook: Notebook | None = None,
+        max_turns: int | None = None,
+        add_turns: int | None = None,
+        history_turns: int | None = None,
+        delay: float | None = None,
+    ) -> None:
+        """Put a different player at the keyboard, without moving the world.
+
+        Same engine, same room, same score, same inventory, same map. The only
+        thing that changes is who gets asked for the next command. That makes
+        one thing possible that separate runs cannot: a position reached by one
+        player, continued by another — a human opening the house and a model
+        taking it underground, or the reverse when a run gets stuck.
+
+        It also makes one thing impossible, and nothing here pretends
+        otherwise: the score afterwards is not the new player's score. The
+        trace carries `run.handoff` precisely so that every turn can be
+        attributed to whoever actually typed it, and so no summary that spans
+        one can be read as a result about either player.
+
+        `inherit_transcript` is the part that matters if you care about the
+        answer. Left on, the new player reads the last N exchanges of its
+        predecessor's play — which, after a human, is the strongest coaching
+        anywhere in this repository: expert moves, in the game's own words,
+        against this exact world. Turned off, it starts from the room it is
+        standing in and nothing else, which is the only version of a takeover
+        comparable with a cold run.
+        """
+        if not self.started:
+            raise RuntimeError("nothing to hand over yet — the run has not started")
+        if self.finished:
+            raise RuntimeError("the run is over")
+
+        await self._interrupt()
+
+        previous = self.agent
+        self.agent = agent
+        # Whatever the old player asked to write down, it never saw the reply.
+        self._pending_journal = ""
+
+        if history_turns is not None:
+            self.config.history_turns = history_turns
+        if delay is not None:
+            self.config.delay = delay
+        if max_turns is not None:
+            self.config.max_turns = max_turns
+        # Turns from here, counted after the interrupt: the turn the old player
+        # was still thinking about has been given back by now, and a budget
+        # measured against a turn number that then moved would be off by one.
+        if add_turns is not None:
+            self.config.max_turns = self.turn + max(add_turns, 1)
+        # A budget already spent would end the run on the takeover's first
+        # turn. Someone who asks for a handoff is asking for turns.
+        if self.turn >= self.config.max_turns:
+            self.config.max_turns = self.turn + HANDOFF_TURNS
+
+        if not inherit_transcript:
+            self._agent_floor = len(self.transcript)
+
+        if notebook is not None:
+            self.notebook = notebook
+        if self.notebook is not None:
+            self.run_number = self.notebook.begin_run(
+                agent.memory, agent.journal, session=self.id,
+                handoff_from=previous.name, handoff_turn=self.turn,
+            )
+
+        state = self._last_state
+        record = {
+            "turn": self.turn,
+            "from": previous.name,
+            "to": agent.name,
+            "inherits": inherit_transcript,
+        }
+        self.handoffs.append(record)
+        self._emit(
+            "run.handoff",
+            turn=self.turn,
+            steps=self.steps,
+            score=state.score if state else 0,
+            room=state.location_name if state else "",
+            from_agent=previous.name,
+            from_kind=previous.kind,
+            agent=agent.name,
+            agent_kind=agent.kind,
+            agent_config=agent.describe(),
+            # False means the new player was handed the room it stands in and
+            # nothing else — no record of how anyone got there.
+            inherits=inherit_transcript,
+            config={
+                "max_turns": self.config.max_turns,
+                "history_turns": self.config.history_turns,
+            },
+            memory=agent.memory.to_dict(),
+            journal=agent.journal.to_dict() if agent.journal is not None else None,
+            notebook=self.notebook.summary() if self.notebook else None,
+        )
+        await agent.on_start(self.transcript[-1][1] if self.transcript else "")
+
+    async def _interrupt(self) -> None:
+        """Stop the loop mid-turn and wait for it to actually be stopped.
+
+        Whatever it was awaiting is inside `agent.act` — a human who has not
+        typed yet, or a model call whose answer nobody is going to read now.
+        The engine has not been told anything at that point, so cancelling
+        there costs a wasted inference and no world state at all.
+        """
+        self.pause()
+        task, self._task = self._task, None
+        if task is None or task.done() or task is asyncio.current_task():
+            return
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
 
     def _ingest(self, command: str, obs: Observation, state: WorldState) -> None:
         """Fold one engine result into map, transcript, and the event stream."""
@@ -378,6 +511,13 @@ class Session:
 
         try:
             action = await self.agent.act(ctx)
+        except asyncio.CancelledError:
+            # Someone took the keyboard, or the session is being torn down,
+            # while this player was still deciding. Nothing reached the engine,
+            # so this turn did not happen and must not be counted as one.
+            self.turn -= 1
+            self.steps -= 1
+            raise
         except Exception as exc:  # an agent crash should not kill the observatory
             self._emit("error", where="agent.act", message=f"{type(exc).__name__}: {exc}")
             await self._finish(f"agent error: {exc}")
@@ -420,13 +560,18 @@ class Session:
         return True
 
     def _context(self) -> TurnContext:
+        # The player's own history, which after a handoff may start later than
+        # the run does. The current observation is never withheld: you can
+        # take over a game without being told how it was played, but not
+        # without being told where you are standing.
+        own = self.transcript[self._agent_floor:]
         return TurnContext(
             turn=self.turn,
             observation=self.transcript[-1][1] if self.transcript else "",
             score=self._last_state.score if self._last_state else 0,
             moves=self._last_state.moves if self._last_state else 0,
             # [-0:] is the whole list; a window of zero means no history.
-            transcript=self.transcript[-self.config.history_turns:] if self.config.history_turns > 0 else [],
+            transcript=own[-self.config.history_turns:] if self.config.history_turns > 0 else [],
             valid_actions=self.engine.valid_actions() if self.config.collect_valid_actions else None,
             life=self.life,
             lives_left=self.lives_left,
@@ -628,6 +773,9 @@ class Session:
             censored=censored,
             deaths=self.deaths,
             lives_used=self.life,
+            # Empty for an ordinary run. Anything in it means these numbers
+            # belong to more than one player.
+            handoffs=list(self.handoffs),
             memory=self.agent.memory.to_dict(),
             journal=self.agent.journal.summary() if self.agent.journal is not None else None,
             turns=self.turn,
@@ -708,6 +856,9 @@ class Session:
             "game": self.engine.name,
             "agent": self.agent.name,
             "agent_kind": self.agent.kind,
+            # Who played before, and from which turn. A summary spanning one of
+            # these is a fact about the position, not about either player.
+            "handoffs": list(self.handoffs),
             "turn": self.turn,
             "steps": self.steps,
             "max_turns": self.config.max_turns,

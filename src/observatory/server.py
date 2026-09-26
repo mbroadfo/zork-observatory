@@ -175,6 +175,28 @@ class Control(BaseModel):
     action: str  # run | pause | step
 
 
+class Handoff(BaseModel):
+    """Who takes the keyboard next, on the run already in progress."""
+
+    agent: str = "ollama"
+    model: str = ""
+    effort: str = "medium"
+    think: str = "default"
+    info_level: str = "parser"
+    num_ctx: int = DEFAULT_NUM_CTX
+    temperature: float = DEFAULT_TEMPERATURE
+    history_turns: int = DEFAULT_HISTORY
+    journal: bool = False
+    notebook: str = "off"
+    # Whether the new player is shown the turns it did not play. See
+    # Session.handoff — this is the difference between a demonstration and a
+    # measurement.
+    inherit_transcript: bool = True
+    add_turns: int = 200         # budget from here, not from turn zero
+    delay: float = 0.35
+    start: bool = True           # begin playing at once
+
+
 class Command(BaseModel):
     command: str
 
@@ -392,6 +414,81 @@ async def control(req: Control) -> JSONResponse:
         await session.step_once()
     else:
         return JSONResponse({"error": f"unknown action {req.action!r}"}, status_code=400)
+    return JSONResponse({"session": session.summary()})
+
+
+@app.post("/api/handoff")
+async def handoff(req: Handoff) -> JSONResponse:
+    """Hand the live game to a different player, from wherever it stands.
+
+    The world is untouched: same engine, same room, same score. Only the thing
+    being asked for a command changes. Useful in both directions — open the
+    house yourself and let a model take it underground, or take the keyboard
+    back from a run that has spent forty turns typing `look`.
+
+    What this is not is a way to produce a score for the incoming player. The
+    handoff is recorded into the trace for exactly that reason.
+    """
+    session = hub.session
+    if session is None:
+        return JSONResponse({"error": "no session"}, status_code=400)
+    if session.finished:
+        return JSONResponse({"error": "the run is over — start a new one"}, status_code=400)
+    if not session.started:
+        return JSONResponse({"error": "nothing to hand over yet"}, status_code=400)
+    if req.agent == "scripted":
+        # The walkthrough starts at the first move of a fresh game. Replaying
+        # it from turn 83 is not a run, it is a random command list.
+        return JSONResponse(
+            {"error": "the walkthrough only makes sense from the first move"},
+            status_code=400,
+        )
+    if req.notebook not in NOTEBOOK_MODES:
+        return JSONResponse({"error": f"unknown notebook mode {req.notebook!r}"}, status_code=400)
+
+    try:
+        agent = build_agent(
+            req.agent,
+            seed=session.turn,
+            model=req.model,
+            effort=req.effort,
+            history_turns=req.history_turns,
+            info_level=req.info_level,
+            think=parse_think(req.think),
+            num_ctx=req.num_ctx,
+            temperature=req.temperature,
+            journal=req.journal,
+        )
+    except Exception as exc:
+        return JSONResponse({"error": f"{type(exc).__name__}: {exc}"}, status_code=400)
+
+    # Ask the model server whether it can serve this before the running game
+    # loses its player to a name that does not resolve.
+    preflight = getattr(agent, "preflight", None)
+    problem = await preflight() if preflight else None
+    if problem:
+        return JSONResponse({"error": problem}, status_code=400)
+
+    notebook = None
+    if req.notebook != "off" and session.notebook is None:
+        notebook = Notebook.open(
+            NOTEBOOK_DIR,
+            session.engine.story or session.engine.name,
+            agent.name,
+            fresh=req.notebook == "new",
+        )
+
+    await session.handoff(
+        agent,
+        inherit_transcript=req.inherit_transcript,
+        notebook=notebook,
+        add_turns=req.add_turns,
+        history_turns=req.history_turns,
+        delay=req.delay,
+    )
+    if req.start and agent.kind != "human":
+        session.resume()
+        session.start_background()
     return JSONResponse({"session": session.summary()})
 
 

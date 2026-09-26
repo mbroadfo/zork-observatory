@@ -24,6 +24,9 @@ EventType = Literal[
     "discovery.made",
     "lesson.learned",
     "run.restored",
+    # A different player took the keyboard, mid-run. Everything after this is
+    # theirs; everything before it is not.
+    "run.handoff",
     "session.ended",
     "error",
 ]
