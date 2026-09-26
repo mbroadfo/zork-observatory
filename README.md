@@ -355,8 +355,9 @@ across deaths and rollbacks — and a test holds it to that.
 
 ### The chart: a period map under fog
 
-For Zork I there is a second view: the 1982 Zork Users Group map (D. Ardito
-and S. Meretzky), kept dark until the run gets there. Each room the run visits
+For Zork I there is a second view: the 1982 Zork Users Group map — designed by
+Steve Meretzky with art by David Ardito, published by ZUG as hint material —
+kept dark until the run gets there. Each room the run visits
 clears a ragged, soft-edged patch of fog. Each passage it walks is uncovered
 along the line the cartographers inked, starting from the room it left. The current room pulses. Its recent path is drawn as
 marching dashes, deaths are marked in red, and a minimap shows where the view
@@ -373,12 +374,31 @@ measured on one release says nothing about another. Zork has four rooms called
 Forest and fifteen called Maze; each was matched to its box by reading the
 exit table out of the story file. Games with no matching atlas get the graph.
 
-**The scan is not included**, for the same reason the story file isn't.
-Supply your own copy and build the web image:
+**The scan is not included**, for the same reason the story file isn't. The
+atlas is calibrated against **one particular scan** — 6517 × 5030 — and a
+different scan of the same map will not line up. `build_atlas.py` compares the
+dimensions and refuses rather than drawing boxes in the wrong places.
+
+That scan is the one Andrew Plotkin hosts in his
+[collection of Infocom and Zork maps](https://eblong.com/infocom/maps/), as
+[`zork-1-map-ZUG-1982.jpeg`](https://eblong.com/infocom/maps/zork-1-map-ZUG-1982.jpeg)
+— 11,285,455 bytes, md5 `cc516cee0dc06ba7141bba52c8aa56fb`. Check what you have
+before building:
+
+```bash
+md5sum assets/zork-1-map-ZUG-1982.jpeg   # cc516cee0dc06ba7141bba52c8aa56fb
+```
+
+The same map is also at the Internet Archive as
+[a PDF of all three Zork maps](https://archive.org/details/zork-i-ii-iii-maps)
+and at [MOCAGH](https://mocagh.org/infocom/zork-zugmap.pdf); those are different
+files and will not calibrate against this atlas without re-measuring every box.
+
+Then build the web image:
 
 ```bash
 pip install pillow
-python tools/build_atlas.py path/to/zork-1-map-ZUG-1982.jpeg          # 6517×5030
+python tools/build_atlas.py assets/zork-1-map-ZUG-1982.jpeg             # 6517×5030
 python tools/build_atlas.py path/to/scan.jpeg --check traces/check.jpg  # outline every box
 ```
 

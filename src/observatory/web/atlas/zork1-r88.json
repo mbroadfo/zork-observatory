@@ -1,8 +1,10 @@
 {
   "title": "Zork I — The Great Underground Empire",
-  "credit": "Map designed by D. Ardito and S. Meretzky · © 1982 Zork Users Group",
+  "credit": "Map designed by Steve Meretzky, art by David Ardito · published by the Zork Users Group, 1982",
+  "source": "https://eblong.com/infocom/maps/zork-1-map-ZUG-1982.jpeg",
   "story": "88-840726-a129",
   "image": "zork1-zug-1982.jpg",
+  "image_md5": "cc516cee0dc06ba7141bba52c8aa56fb",
   "width": 6517,
   "height": 5030,
   "note": "Room boxes are [x0, y0, x1, y1] in pixels of the original 6517x5030 scan, keyed by Z-machine object number. Duplicate names (four Forests, fifteen Mazes) were told apart by their exit tables, not by position.",
