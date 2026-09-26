@@ -6,8 +6,14 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      # Supply your own game files here. Nothing copyrighted ships with this repo.
-      - ./roms:/app/roms:ro
+      # Supply your own game files here. Nothing copyrighted ships with this
+      # repo. Writable, because the observatory's setup panel offers to fetch
+      # them from the sources the research community uses — on a button press
+      # and never on its own. `python tools/fetch_assets.py` does the same
+      # thing from the host, if you would rather these stayed read-only.
+      - ./roms:/app/roms
+      # The map scan the chart is drawn on; also fetched on request.
+      - ./assets:/app/assets
       - ./traces:/app/traces
       # Live-edit the source without rebuilding.
       - ./src:/app/src

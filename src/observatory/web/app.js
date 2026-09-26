@@ -1420,9 +1420,107 @@ function toast(message, ms = 4000) {
   toastTimer = setTimeout(() => el.classList.remove("on"), ms);
 }
 
+/* ------------------------------------------------------------------ *
+ * Setup
+ *
+ * The one thing this project cannot ship is the game. Rather than let a new
+ * reader press Run and get an oblique "Game file not found" from the engine,
+ * the page asks the server what is on disk and offers to fetch it — saying
+ * whose work it is, where it comes from and what will be checked, before
+ * anything is downloaded. Nothing happens without the button.
+ * ------------------------------------------------------------------ */
+
+let setupState = null;
+
+async function checkAssets() {
+  try {
+    setupState = await (await fetch("/api/assets")).json();
+  } catch {
+    return;                       // server not up yet; refresh() will complain
+  }
+  renderSetup();
+  // Only in the way when there is nothing to play. Someone who dismissed it,
+  // or who has the files, never sees it.
+  if (!setupState.ready && !sessionStorage.getItem("setup-dismissed")) {
+    $("setup").hidden = false;
+  }
+}
+
+function renderSetup() {
+  if (!setupState) return;
+  const holder = setupState.assets[0]?.holder;
+  if (holder) $("setup-holder").textContent = holder;
+
+  $("setup-list").innerHTML = setupState.assets
+    .map((a) => {
+      const cls = a.present ? "ok" : a.detail === "missing" ? "missing" : "bad";
+      const label = a.present ? "on disk" : a.detail;
+      return `<li>
+        <span class="state ${cls}">${escapeHtml(label)}</span>
+        <div class="what">${escapeHtml(a.what)}${a.required ? "" : " — optional, for the chart"}</div>
+        <div class="from">from ${escapeHtml(a.source)} ·
+          <a href="${escapeHtml(a.source_url)}" target="_blank" rel="noreferrer noopener">${escapeHtml(a.source_url)}</a></div>
+        <div class="hash">${escapeHtml(a.path)} · ${a.size.toLocaleString()} bytes · md5 ${escapeHtml(a.md5)}</div>
+      </li>`;
+    })
+    .join("");
+
+  const note = $("setup-note");
+  if (!setupState.writable) {
+    note.textContent =
+      "This server cannot write roms/ or assets/ — the mount is read-only. " +
+      "Run `python tools/fetch_assets.py` on the host instead.";
+    note.classList.add("bad");
+    $("setup-fetch").disabled = true;
+  }
+}
+
+$("setup-fetch").onclick = async () => {
+  const button = $("setup-fetch");
+  const note = $("setup-note");
+  button.disabled = true;
+  note.classList.remove("bad");
+  note.textContent = "downloading and checking the md5 of each file…";
+  try {
+    const res = await fetch("/api/assets/fetch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const data = await res.json();
+    setupState = data;
+    renderSetup();
+    const failed = (data.results || []).filter((r) => !r.ok);
+    if (failed.length) {
+      note.classList.add("bad");
+      note.textContent = failed.map((r) => `${r.key}: ${r.detail}`).join(" · ");
+      button.disabled = false;
+    } else {
+      note.textContent = "verified. The chart needs one more step — see the README.";
+      setTimeout(() => { $("setup").hidden = true; }, 1200);
+      refresh();
+    }
+  } catch (err) {
+    note.classList.add("bad");
+    note.textContent = `could not reach the server: ${err}`;
+    button.disabled = false;
+  }
+};
+
+$("setup-skip").onclick = () => {
+  // Remembered for the tab only. A reload in a new session asks again, which
+  // is right: the files still are not there.
+  sessionStorage.setItem("setup-dismissed", "1");
+  $("setup").hidden = true;
+  $("engine").value = "mock";
+  syncEngineControls();
+  toast("Mock world selected — a test fixture, not a benchmark.");
+};
+
 syncAgentControls();
 syncEngineControls();
 applyLayout();
 setView(preferredView);
 connect();
 refresh();
+checkAssets();

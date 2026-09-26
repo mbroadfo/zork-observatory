@@ -19,6 +19,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from . import assets
 from .agents import DEFAULT_HISTORY, DEFAULT_NUM_CTX, DEFAULT_TEMPERATURE, build_agent, parse_think
 from .notebook import MODES as NOTEBOOK_MODES, Notebook
 from .agents.simple import HumanAgent
@@ -29,6 +30,9 @@ from .trace import TraceWriter, read_events, trace_header
 
 WEB_DIR = Path(__file__).parent / "web"
 TRACE_DIR = Path("traces")
+# Where roms/ and assets/ live, relative to wherever the server was started —
+# the same convention TRACE_DIR uses, and /app in the container.
+ASSET_ROOT = Path(".")
 
 
 SERIES_PAUSE_S = 2.0
@@ -201,6 +205,39 @@ async def state() -> JSONResponse:
     if hub.session is None:
         return JSONResponse({"session": None, "traces": _list_traces()})
     return JSONResponse({"session": hub.session.summary(), "traces": _list_traces()})
+
+
+@app.get("/api/assets")
+async def assets_status() -> JSONResponse:
+    """What is on disk of the material this project cannot ship."""
+    return JSONResponse(assets.survey(ASSET_ROOT))
+
+
+class FetchAssets(BaseModel):
+    key: str | None = None      # one of them, or all when left out
+
+
+@app.post("/api/assets/fetch")
+async def assets_fetch(req: FetchAssets) -> JSONResponse:
+    """Download the copyrighted files, on an explicit request and no other way.
+
+    Reached only from the setup panel's button, which says what it is about to
+    do and who owns it first. Nothing here runs at startup: a reader who wants
+    the mock world, or who has their own copy, should never be asked.
+
+    Each download is verified against the md5 the project was measured with and
+    discarded if it does not match — the walkthrough holds for one release and
+    the chart's room boxes are pixels of one scan.
+    """
+    if req.key is not None and req.key not in assets.BY_KEY:
+        return JSONResponse({"error": f"unknown asset {req.key!r}"}, status_code=400)
+    wanted = [assets.BY_KEY[req.key]] if req.key else list(assets.ASSETS)
+
+    # Blocking network and disk work; off the event loop so the page stays live.
+    results = [
+        await asyncio.to_thread(assets.fetch, asset, ASSET_ROOT) for asset in wanted
+    ]
+    return JSONResponse({"results": results, **assets.survey(ASSET_ROOT)})
 
 
 @app.get("/api/atlas")

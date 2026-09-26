@@ -29,8 +29,18 @@ which wraps a modified Frotz and exposes the live object tree, `get_state` /
 effectively Linux-only, so the core runs in Docker.
 
 ```bash
-# Put a story file in roms/ first — see below.
 docker compose up --build        # → http://127.0.0.1:8000
+```
+
+With no story file on disk the observatory opens on a setup panel: it names
+the work and who owns it, shows where each file comes from and the md5 it will
+be checked against, and offers one button. Nothing is downloaded until that
+button is pressed, and a run against the mock world never needs it. The same
+thing from a terminal, if you would rather:
+
+```bash
+python tools/fetch_assets.py          # fetch what is missing, verify it
+python tools/fetch_assets.py --check  # verify what is there, download nothing
 ```
 
 Or headless:
@@ -44,11 +54,31 @@ docker run --rm -v "$PWD/roms:/app/roms:ro" zork-observatory \
 ### Game files
 
 **Not included.** Zork is copyrighted by Activision and is not distributed with
-this project. The research community's reference corpus is the
-[Jericho game suite](https://github.com/BYU-PCCL/z-machine-games), which is what
-essentially every interactive-fiction RL paper benchmarks against; drop a story
-file into `roms/` and point `--rom` at it. Verified against Zork I, Release 88 /
-Serial 840726 (Z-machine v3, 350 points, 246 objects).
+this project. Fetching your own copy is your decision and your responsibility;
+what this project does is name exactly which copy it was measured against, and
+check that you have that one.
+
+Everything runs against **Zork I, Release 88 / Serial 840726** (Z-machine v3,
+350 points, 246 objects), as distributed in the
+[Jericho game suite](https://github.com/BYU-PCCL/z-machine-games) — the corpus
+essentially every interactive-fiction RL paper benchmarks against, which is
+what makes a score here comparable to a score in that literature.
+
+```text
+roms/zork1.z5     92,160 bytes   md5 b732a93a6244ddd92a9b9a3e3a46c687
+```
+
+`tools/fetch_assets.py` and the observatory's setup panel both read one
+manifest, in `src/observatory/assets.py`, and both verify that hash. A download
+that does not match is discarded rather than written, and an existing file is
+never overwritten — a different release is a thing you might have meant to
+keep, and it is worth telling apart from a failed download. A different release
+also means no walkthrough (Jericho verifies its own against one seed) and no
+chart (the atlas is keyed to this release's object numbers), so the check is
+not pedantry.
+
+Any Z-machine story file works with `--rom`; only Zork I gets the walkthrough
+and the chart.
 
 ### The mock world
 
@@ -645,6 +675,7 @@ src/observatory/
   notebook.py   what crosses from one run to the next
   events.py     the event bus
   trace.py      JSONL read/write
+  assets.py     what this project cannot ship, and where it legitimately lives
   server.py     FastAPI + WebSocket
   web/          the front end · atlas.js (the chart) · atlas/ (room boxes)
 tools/
@@ -653,6 +684,8 @@ tools/
   sweep.sh        one configuration at a time, because there is one GPU
   summarize_sweep.py · sweep_status.py   the sweep read back, finished or live
   structure.py    the shape of the map a trace drew, rebuilt from its events
+  seed_journal.py a journal built from the game's own walkthrough
+  fetch_assets.py the copyrighted files, from named sources, hash-checked
 docs/experiments/  what was measured, and what was removed because of it
 ```
 
