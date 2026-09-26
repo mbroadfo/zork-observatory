@@ -254,8 +254,10 @@ class TestReadingBack:
 
     def test_the_rendering_is_plain_ascii(self):
         """It is worth copying verbatim, so it should not depend on the
-        transport carrying anything cleverer than ASCII."""
+        transport carrying anything cleverer than ASCII. Headings included."""
         j = Journal()
+        j.adopt([Entry("Taken.", turn=4, room="Up a Tree", command="Get egg",
+                       outcome="progress")])
         kept(j, "Took the sack from the table.", turn=82,
              room="Kitchen", command="take sack", run=2)
         j.render().encode("ascii")
@@ -274,6 +276,70 @@ class TestReadingBack:
         assert "3 earlier entries not shown" in rendered
 
 
+class TestWhatWasGivenIsNotWhatWasEarned:
+    """A seeded run rendered `"Get egg" worked: Taken.` with no provenance at
+    all, because `render` only printed a run marker when `run` was truthy and a
+    seed carries `run=0`. The model read it as a fact about now and spent forty
+    turns trying to open an egg it had never picked up, hunting a staircase in
+    a forest, and typing `go to attic` at a parser with no such word. Meanwhile
+    the summary counted the twenty-two entries it had been handed as twenty-two
+    of its own, reading 64% truthful on a run that had kept nothing.
+    """
+
+    def seeded(self) -> Journal:
+        j = Journal()
+        j.adopt([
+            Entry("Taken.", turn=4, room="Up a Tree", command="Get egg",
+                  outcome="progress"),
+            Entry("The brass lantern is now on.", turn=16, room="Attic",
+                  command="Light lamp", outcome="progress"),
+        ])
+        return j
+
+    def test_carried_entries_say_they_are_from_earlier_runs(self):
+        rendered = self.seeded().render()
+        assert "From earlier runs" in rendered
+        assert "none of this is true yet" in rendered
+        assert "things you have" in rendered
+
+    def test_carried_and_earned_are_rendered_apart(self):
+        j = self.seeded()
+        kept(j, "Opening the small mailbox reveals a leaflet.", turn=2,
+             room="West of House", command="open mailbox")
+        rendered = j.render()
+        assert rendered.index("Get egg") < rendered.index("This run")
+        assert rendered.index("This run") < rendered.index("open mailbox")
+
+    def test_a_journal_with_nothing_carried_says_nothing_about_earlier_runs(self):
+        j = Journal()
+        kept(j, "Opening the small mailbox reveals a leaflet.", turn=2)
+        assert "From earlier runs" not in j.render()
+
+    def test_the_gift_is_left_out_of_this_run_s_figures(self):
+        j = self.seeded()
+        s = j.summary()
+        assert (s["carried"], s["kept"], s["attempted"]) == (2, 0, 0)
+        assert s["truthful_pct"] == 0.0        # it has not earned anything yet
+
+        j.add("Solved it.", turn=9, outcome="futile")
+        s = j.summary()
+        assert (s["carried"], s["kept"], s["attempted"], s["false"]) == (2, 0, 1, 1)
+        assert s["truthful_pct"] == 0.0
+
+        kept(j, "Opening the small mailbox reveals a leaflet.", turn=10)
+        s = j.summary()
+        assert (s["count"], s["carried"], s["kept"], s["attempted"]) == (3, 2, 1, 2)
+        assert s["truthful_pct"] == 50.0
+
+    def test_the_notebook_hands_entries_over_as_carried(self, tmp_path):
+        book = Notebook.open(tmp_path, "story", "ollama:qwen3:8b")
+        book.write(Entry("Taken.", turn=4, room="Up a Tree", command="Get egg",
+                         outcome="progress"))
+        j = Journal()
+        book.begin_run(AgentMemory(), j)
+        assert j.carried == 1 and j.mine == [] and j.attempted == 0
+
+
 class TestCorroboration:
     def test_the_summary_separates_what_happened_from_what_was_claimed(self):
         j = Journal()
@@ -284,6 +350,8 @@ class TestCorroboration:
 
         assert j.summary() == {
             "count": 2,
+            "carried": 0,
+            "kept": 2,
             "attempted": 4,
             "rejected": 2,
             "truthful": 2,

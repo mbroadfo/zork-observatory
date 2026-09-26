@@ -191,13 +191,33 @@ class Journal:
         self.shown = shown
         self.corroborated_only = corroborated_only
         self.keep_movement = keep_movement
+        # How many of `entries` were handed over at the start rather than
+        # earned. They are rendered apart from the rest and left out of every
+        # figure about this run: a seeded journal that counted its own gift as
+        # twenty-two correct entries read 64% truthful on a run that had not
+        # kept a single line.
+        self.carried = 0
+        # Lines this run offered, counted here rather than derived from the
+        # lists, for the same reason.
+        self.offered = 0
+
+    def adopt(self, entries: list[Entry]) -> None:
+        """Take on a record from earlier runs. Nothing here is this run's."""
+        self.entries = list(entries)
+        self.carried = len(self.entries)
 
     def __len__(self) -> int:
         return len(self.entries)
 
     @property
     def attempted(self) -> int:
-        return len(self.entries) + len(self.rejected)
+        """Lines this run offered. Never what it was given."""
+        return self.offered
+
+    @property
+    def mine(self) -> list[Entry]:
+        """Entries this run wrote, as against the ones handed to it."""
+        return self.entries[self.carried:]
 
     def add(
         self, text: str, turn: int, room: str = "", command: str = "",
@@ -237,6 +257,7 @@ class Journal:
         text = " ".join((text or "").split())[:MAX_ENTRY_CHARS].strip()
         if not text:
             return None
+        self.offered += 1
         entry = Entry(
             text=text, turn=turn, room=room, command=command,
             outcome=outcome, run=run,
@@ -301,15 +322,39 @@ class Journal:
         if not self.entries:
             return ""
         recent = self.entries[-self.shown:]
-        lines = ["Your journal, in the order you wrote it:"]
-        for entry in recent:
-            where = f" ({entry.room})" if entry.room else ""
-            run = f"run {entry.run}, " if entry.run else ""
-            typed = f'"{entry.command}" worked: ' if entry.command else ""
-            lines.append(f"- [{run}turn {entry.turn}{where}] {typed}{entry.text}")
-        if len(self.entries) > len(recent):
-            lines.append(f"({len(self.entries) - len(recent)} earlier entries not shown)")
+        dropped = len(self.entries) - len(recent)
+        carried = [e for e in recent[:max(0, self.carried - dropped)]]
+        mine = recent[len(carried):]
+
+        lines: list[str] = []
+        if carried:
+            # Said outright, because leaving it implied was enough to break a
+            # run. A seed carrying `"Get egg" worked: Taken.` rendered with no
+            # provenance at all, and the model spent forty turns trying to open
+            # an egg it had never picked up, hunting a staircase in a forest and
+            # typing `go to attic` at a parser with no such word. The entries
+            # were true of an earlier run and it read them as true of this one.
+            lines.append(
+                "From earlier runs. The world has started over since, so none of "
+                "this is true yet. These are commands that worked then, not "
+                "things you have or places you can reach from here:"
+            )
+            lines.extend(self._line(e) for e in carried)
+            if mine:
+                lines.append("")
+        if mine:
+            lines.append("This run, in the order you wrote it:")
+            lines.extend(self._line(e) for e in mine)
+        if dropped:
+            lines.append(f"({dropped} earlier entries not shown)")
         return "\n".join(lines)
+
+    @staticmethod
+    def _line(entry: Entry) -> str:
+        where = f" ({entry.room})" if entry.room else ""
+        run = f"run {entry.run}, " if entry.run else ""
+        typed = f'"{entry.command}" worked: ' if entry.command else ""
+        return f"- [{run}turn {entry.turn}{where}] {typed}{entry.text}"
 
     def to_dict(self) -> list[dict[str, Any]]:
         return [entry.to_dict() for entry in self.entries]
@@ -349,16 +394,18 @@ class Journal:
                     refused_outcomes.get(entry.outcome or "unclassified", 0) + 1
                 )
         outcomes: dict[str, int] = {}
-        for entry in self.entries:
+        for entry in self.mine:
             if entry.outcome:
                 outcomes[entry.outcome] = outcomes.get(entry.outcome, 0) + 1
 
         truthful = (
-            sum(1 for e in self.entries if e.corroborated)
+            sum(1 for e in self.mine if e.corroborated)
             + sum(1 for e in self.rejected if e.truthful)
         )
         return {
             "count": len(self.entries),
+            "carried": self.carried,
+            "kept": len(self.mine),
             "attempted": attempted,
             "rejected": len(self.rejected),
             "truthful": truthful,

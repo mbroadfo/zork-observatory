@@ -91,7 +91,10 @@ class Notebook:
         """Hand the agent everything written so far and open a new run."""
         memory.lessons = list(self.lessons)
         if journal is not None:
-            journal.entries = list(self.journal)
+            # adopt, not assign: the run needs to know which entries it was
+            # handed, so it can render them apart and leave them out of its
+            # own figures.
+            journal.adopt(self.journal)
         number = len(self.runs) + 1
         self.runs.append({
             "run": number,
