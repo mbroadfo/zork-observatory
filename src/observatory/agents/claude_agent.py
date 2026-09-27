@@ -11,10 +11,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import time
 from typing import Any
 
+from .. import credentials
 from . import llm, prompts
 from .base import Agent, AgentAction, TurnContext
 from .journal import Journal
@@ -57,16 +57,16 @@ def takes_effort(model: str) -> bool:
     return not model.startswith(NO_EFFORT_PREFIXES)
 
 
-# Either of these lets the SDK authenticate on its own; a gateway may need
-# neither. Checked by name rather than by trying a call, so the common mistake
-# — no key in the container's environment — is reported as itself.
-KEY_VARS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+# Kept for callers that ask directly; the resolution order itself lives in
+# credentials.py, which the page and the CLI share.
+KEY_VARS = (credentials.ENV_KEY, credentials.ENV_TOKEN)
 
-NO_KEY = """no Anthropic credentials. The observatory reads ANTHROPIC_API_KEY \
-from the environment it was started in — put it in a .env file beside \
-docker-compose.yml (it is gitignored) or export it in the shell you bring the \
-stack up from, then restart. Everything except the `claude` player works \
-without one."""
+NO_KEY = """no Anthropic credentials. Paste a key into the observatory — the \
+setup panel takes one and it works from the next turn, no restart — or set \
+ANTHROPIC_API_KEY in the environment you start the stack in. A key comes from \
+console.anthropic.com/settings/keys and is metered usage, separate from a \
+Claude subscription. Everything except the `claude` player works without \
+one."""
 
 
 def output_config(model: str, effort: str, fmt: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -118,10 +118,17 @@ class ClaudeAgent(Agent):
             else prompts.get(info_level)
         )
         self.name = f"claude:{model}" + ("" if info_level == DEFAULT_INFO_LEVEL else f"/{info_level}")
-        # A key passed in beats the environment; either way preflight has to
-        # know which it is before it decides there are no credentials at all.
-        self._explicit_key = api_key
-        self._client = anthropic.AsyncAnthropic(api_key=api_key) if api_key else anthropic.AsyncAnthropic()
+        # A key passed in beats everything. Otherwise: the environment, then
+        # one saved from the page, then whatever the SDK finds for itself.
+        # `source` is what preflight reports and the page displays.
+        self.credential_source, resolved = (
+            ("explicit", api_key) if api_key else credentials.resolve()
+        )
+        self._explicit_key = api_key or resolved
+        self._client = (
+            anthropic.AsyncAnthropic(api_key=self._explicit_key)
+            if self._explicit_key else anthropic.AsyncAnthropic()
+        )
         self._totals = {
             "input_tokens": 0,
             "output_tokens": 0,
@@ -146,10 +153,7 @@ class ClaudeAgent(Agent):
         """
         import anthropic
 
-        key = self._explicit_key or next(
-            (os.environ[v] for v in KEY_VARS if os.environ.get(v)), None
-        )
-        if not key and not os.environ.get("ANTHROPIC_BASE_URL"):
+        if self.credential_source == "none":
             return NO_KEY
         try:
             await self._client.messages.create(
@@ -291,6 +295,8 @@ class ClaudeAgent(Agent):
             "history_turns": self.history_turns,
             "max_tokens": self.max_tokens,
             "info_level": self.info_level,
+            # Which of the credential paths this run used. Never the credential.
+            "credential_source": getattr(self, "credential_source", "unknown"),
             "journal": getattr(self, "journal", None) is not None,
             "system_prompt": self.system,
             # Of the prompt actually sent, which the journal adds to. A run

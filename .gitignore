@@ -22,5 +22,9 @@ src/observatory/web/atlas/*.jpg
 
 # Run output
 traces/
+
+# Credentials. `.env` is read by Compose at startup; `.secrets/` holds a key
+# pasted into the setup panel, which takes effect without a restart.
 .env
+.secrets/
 .pytest_cache/

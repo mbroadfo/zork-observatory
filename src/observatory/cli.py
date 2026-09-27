@@ -246,6 +246,12 @@ def main(argv: list[str] | None = None) -> int:
         except (AttributeError, ValueError):
             pass
 
+    # An Anthropic variable exported as empty means "unset" wherever it came
+    # from, and something much worse to the SDK. See credentials.py.
+    from . import credentials
+
+    credentials.sanitize_environment()
+
     parser = argparse.ArgumentParser(prog="observatory", description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
 

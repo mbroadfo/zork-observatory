@@ -116,33 +116,65 @@ observatory play --engine jericho --rom roms/zork1.z5 --agent scripted
 
 ### Playing with Claude
 
-This is the one player that needs a credential. Metered API usage, separate from
-any Claude subscription — a key from
-[the console](https://console.anthropic.com/settings/keys):
+This is the one player that needs a credential. Metered API usage billed per
+token, separate from a Claude subscription — a key from
+[the console](https://console.anthropic.com/settings/keys).
+
+**The short way:** pick `claude` in the browser, press the 🔑 button, paste the
+key, Save. It is checked against the API before it is kept, it works from the
+next turn, and nothing restarts. A run refused for want of a credential opens
+the same panel by itself.
+
+**Or from the environment**, which wins over anything saved in the page:
 
 ```bash
-cp .env.example .env        # then paste the key in; .env is gitignored
+cp .env.example .env        # paste the key in; .env is gitignored
 docker compose up           # Compose reads .env on its own
 ```
 
-Or from a shell, without Docker:
-
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...
+export ANTHROPIC_API_KEY=sk-ant-...      # no Docker
 observatory play --agent claude --turns 40 --trace traces/run.jsonl
 ```
 
-`ANTHROPIC_AUTH_TOKEN` (a bearer token) and `ANTHROPIC_BASE_URL` (a gateway
-standing in for the API) work instead, and are passed through to the container.
+Resolution order, shared by the CLI and the page (`credentials.py`):
+
+1. `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` in the environment.
+2. A key saved from the setup panel — `.secrets/anthropic.json`, gitignored,
+   bind-mounted so it survives a rebuild. Plain text in a working directory:
+   anything that can read the directory can read the key, and the panel says so
+   rather than implying a safety it does not have.
+3. Whatever the SDK's own chain finds — including an OAuth profile under the
+   config directory, which the SDK refreshes itself. Nothing here has to change
+   on the day a login tool writes one.
+4. `ANTHROPIC_BASE_URL` alone, for a gateway that supplies the credential.
+
+**There is no "sign in with Anthropic" to offer**, and it is worth saying why.
+The SDK can *consume* an OAuth credential — a `user_oauth` profile, refreshed
+against `/v1/oauth/token` — but it cannot *mint* one: no authorize URL, no PKCE,
+no device flow. Those profiles are the output of an interactive login performed
+by something else, and a browser flow of our own would need an OAuth client
+registered to this app, which is not on offer to third parties. Borrowing a
+client id issued to another program, or reading the tokens that program stored,
+is not a shortcut this project takes. A Claude subscription cannot be used here
+at all.
 
 The credential is checked **before turn one**, with a one-token request to the
 model actually selected. Without that check an unauthenticated client fails
 inside the first turn — the SDK does not complain when it is built, only when it
 is used — and the run dies on turn 1 with an SDK `TypeError` where "no key"
 should be. A wrong key, a model the account cannot reach and an unreachable API
-are each named as themselves. Nothing else in the observatory needs any of this:
-the local models, both baselines, human play and every replay work with no key
-at all.
+are each named as themselves.
+
+One trap worth knowing, because it cost an hour: an Anthropic variable set to
+the *empty string* is not the same as unset. The SDK takes an empty
+`ANTHROPIC_BASE_URL` as the base URL, builds a request with no protocol and
+reports "Connection error", which sends you to inspect your network. Compose
+names these variables without a value so they are omitted when unset rather than
+defined as empty, and the observatory drops empty ones at startup anyway.
+
+Nothing else in the observatory needs any of this: the local models, both
+baselines, human play and every replay work with no credential at all.
 
 The agent sees the transcript and nothing else — no object tree, no valid-action
 list, no walkthrough. `--effort` (default `medium`) and `--history-turns`

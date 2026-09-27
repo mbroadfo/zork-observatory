@@ -19,7 +19,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import assets
+from . import assets, credentials
 from .agents import DEFAULT_HISTORY, DEFAULT_NUM_CTX, DEFAULT_TEMPERATURE, build_agent, parse_think
 from .notebook import MODES as NOTEBOOK_MODES, Notebook
 from .agents.simple import HumanAgent
@@ -144,6 +144,10 @@ class Hub:
 hub = Hub()
 app = FastAPI(title="Zork Observatory")
 
+# Before any agent is built: an Anthropic variable set to the empty string means
+# "unset" everywhere it comes from, and means something much worse to the SDK.
+credentials.sanitize_environment()
+
 
 # --- request models ------------------------------------------------------
 
@@ -260,6 +264,63 @@ async def assets_fetch(req: FetchAssets) -> JSONResponse:
         await asyncio.to_thread(assets.fetch, asset, ASSET_ROOT) for asset in wanted
     ]
     return JSONResponse({"results": results, **assets.survey(ASSET_ROOT)})
+
+
+class SaveKey(BaseModel):
+    key: str = ""
+
+
+@app.get("/api/credentials")
+async def credentials_status() -> JSONResponse:
+    """Whether the Claude player can run, and on which credential.
+
+    No secret leaves this route: a saved key is reported by its last four
+    characters, which is enough to tell two of them apart and nothing else.
+    """
+    return JSONResponse(credentials.status(ASSET_ROOT))
+
+
+@app.post("/api/credentials")
+async def credentials_save(req: SaveKey) -> JSONResponse:
+    """Take a key from the page, prove it works, then keep it.
+
+    Proving it first is the point. A key that is saved and then fails on turn
+    one has taught the reader nothing except that this does not work, and the
+    obvious mistakes — a truncated paste, the wrong string entirely, a key the
+    API does not accept — are all findable in one request that costs a token.
+
+    There is no browser sign-in to offer instead: the SDK can consume an OAuth
+    profile and refresh it, but nothing here can mint one, and a flow that
+    borrowed another application's OAuth client to reach someone's account is
+    not a shortcut this project takes.
+    """
+    problem = credentials.check(req.key)
+    if problem:
+        return JSONResponse({"ok": False, "error": problem}, status_code=400)
+
+    from .agents.claude_agent import ClaudeAgent
+
+    try:
+        probe = ClaudeAgent(api_key=req.key.strip())
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, status_code=400)
+    refused = await probe.preflight()
+    if refused:
+        return JSONResponse({"ok": False, "error": refused}, status_code=400)
+
+    result = await asyncio.to_thread(credentials.save, req.key, ASSET_ROOT)
+    if not result["ok"]:
+        return JSONResponse({"ok": False, "error": result["detail"]}, status_code=400)
+    return JSONResponse({"ok": True, **credentials.status(ASSET_ROOT)})
+
+
+@app.delete("/api/credentials")
+async def credentials_forget() -> JSONResponse:
+    """Remove the key saved here. Anything in the environment is untouched."""
+    result = await asyncio.to_thread(credentials.forget, ASSET_ROOT)
+    if not result["ok"]:
+        return JSONResponse({"ok": False, "error": result["detail"]}, status_code=400)
+    return JSONResponse({"ok": True, "detail": result["detail"], **credentials.status(ASSET_ROOT)})
 
 
 @app.get("/api/atlas")

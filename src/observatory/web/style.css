@@ -156,7 +156,16 @@ button.primary:hover:not(:disabled) { background: #241c08; }
 
 .setup-note { min-height: 18px; font-size: 12px; color: var(--dim); }
 .setup-note.bad { color: var(--red); }
-.setup-actions { display: flex; gap: 8px; margin-bottom: 12px; }
+.setup-actions { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; }
+
+/* The key field. Wide, because a key is long and a truncated paste is the
+   mistake this panel exists to catch. */
+.creds-row { display: flex; gap: 8px; margin: 4px 0 12px; }
+.creds-row input {
+  flex: 1;
+  font-family: inherit;
+  letter-spacing: 0.04em;
+}
 
 /* ---------- readouts ---------- */
 

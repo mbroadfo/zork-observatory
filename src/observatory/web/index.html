@@ -34,6 +34,7 @@
       <option value="claude-haiku-4-5">haiku 4.5</option>
       <option value="claude-fable-5-1" title="Built for fiction. An arm worth its own run on a game that is prose all the way down.">fable 5.1</option>
     </select>
+    <button id="creds-open" class="icon" title="Anthropic credentials" style="display:none">🔑</button>
     <select id="omodel" title="Local model (pulled into Ollama)" style="display:none"></select>
     <select id="think" title="Whether the local model thinks before answering" style="display:none">
       <option value="default" selected>thinking: model default</option>
@@ -111,6 +112,42 @@
         The mock world is a test fixture — it needs no game file, and no number
         produced against it means anything about an agent.
       </p>
+    </div>
+  </div>
+
+  <!-- credentials: the one player that needs one ---------------------- -->
+  <div id="creds" class="setup" hidden>
+    <div class="setup-card">
+      <h2>Connect Claude</h2>
+      <p>
+        The <b>claude</b> player calls the Anthropic API, which needs a key.
+        This is metered usage billed per token — separate from a Claude
+        subscription, which cannot be used here. There is no
+        <i>sign in with Anthropic</i> to offer instead: the SDK can refresh an
+        OAuth profile once something has created one, but nothing can create one
+        from inside this page.
+      </p>
+      <p class="setup-note" id="creds-status"></p>
+      <div class="creds-row">
+        <input type="password" id="creds-key" autocomplete="off" spellcheck="false"
+               placeholder="sk-ant-…">
+        <button id="creds-save" class="primary">Check and save</button>
+      </div>
+      <p class="hint">
+        Get one at
+        <a href="https://console.anthropic.com/settings/keys" target="_blank"
+           rel="noreferrer noopener">console.anthropic.com/settings/keys</a>.
+        It is checked with a one-token request before being saved, so a bad
+        paste is caught here rather than on turn one — and it works from the
+        next turn, with no restart.
+      </p>
+      <p class="hint" id="creds-where"></p>
+      <div class="setup-actions">
+        <button id="creds-local">Use a local model instead</button>
+        <button id="creds-forget" hidden>Forget the saved key</button>
+        <span class="spacer"></span>
+        <button id="creds-close">Close</button>
+      </div>
     </div>
   </div>
 

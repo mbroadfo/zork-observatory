@@ -25,12 +25,22 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - older anthropic
     import httpx  # type: ignore[no-redef]
 
+from observatory import credentials
 from observatory.agents.claude_agent import KEY_VARS, ClaudeAgent, takes_effort
 
 
 def unset_keys(monkeypatch) -> None:
+    """No credential from any of the paths credentials.py knows about.
+
+    Including the two that live outside the process: a key saved in this
+    checkout, and a profile on the developer's machine. Without that, these
+    tests would pass or fail depending on whether whoever ran them had
+    connected Claude in the browser.
+    """
     for var in (*KEY_VARS, "ANTHROPIC_BASE_URL"):
         monkeypatch.delenv(var, raising=False)
+    monkeypatch.setattr(credentials, "saved", lambda root=None: None)
+    monkeypatch.setattr(credentials, "profile", lambda: None)
 
 
 def status_error(code: int, message: str = "nope") -> anthropic.APIStatusError:
@@ -68,8 +78,11 @@ class TestCredentials:
 
         monkeypatch.setattr(player._client.messages, "create", explode)
         problem = await player.preflight()
-        assert problem and "ANTHROPIC_API_KEY" in problem
-        assert ".env" in problem
+        assert problem
+        # Both routes out, in the order they cost the reader anything: the
+        # panel, which needs no restart, then the environment variable.
+        assert "setup panel" in problem
+        assert "ANTHROPIC_API_KEY" in problem
 
     async def test_the_message_says_the_rest_of_the_observatory_still_works(
         self, monkeypatch

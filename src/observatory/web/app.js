@@ -1238,9 +1238,11 @@ async function post(path, body) {
     });
     const data = await res.json();
     if (!res.ok) {
-      toast(data.error || `${res.status} ${res.statusText}`, 7000);
+      lastError = data.error || `${res.status} ${res.statusText}`;
+      toast(lastError, 7000);
       return null;
     }
+    lastError = "";
     return data;
   } catch (err) {
     toast(String(err), 7000);
@@ -1316,6 +1318,7 @@ function syncAgentControls() {
   $("think").style.display = local ? "" : "none";
   $("numctx").style.display = local ? "" : "none";
   $("temp").style.display = local ? "" : "none";
+  $("creds-open").style.display = claude ? "" : "none";
   $("info").style.display = claude || local ? "" : "none";
   $("notebook").style.display = claude || local ? "" : "none";
   $("journal").style.display = claude || local ? "" : "none";
@@ -1385,6 +1388,7 @@ $("new-run").onclick = async () => {
     delay: 0.35,
   };
   const data = await post("/api/session", body);
+  if (!data && looksLikeMissingCredential(lastError)) openCreds();
   if (data && data.session) {
     applySummary(data.session);
     if (data.trace) note(`● recording to ${data.trace}`);
@@ -1439,6 +1443,9 @@ $("handover").onclick = async () => {
     add_turns: parseInt($("turns").value, 10) || 200,
     delay: 0.35,
   });
+  // The game still has its previous player — the route checks before swapping —
+  // so the panel can be filled in and the button pressed again.
+  if (!r && looksLikeMissingCredential(lastError)) openCreds();
   if (r && r.session) applySummary(r.session);
 };
 
@@ -1454,6 +1461,10 @@ $("send").onclick = sendCommand;
 $("human-cmd").addEventListener("keydown", (e) => {
   if (e.key === "Enter") sendCommand();
 });
+
+// The message from the last refused request, so a caller can tell a missing
+// credential from any other reason a run would not start.
+let lastError = "";
 
 let toastTimer = null;
 function toast(message, ms = 4000) {
@@ -1560,6 +1571,109 @@ $("setup-skip").onclick = () => {
   syncEngineControls();
   toast("Mock world selected — a test fixture, not a benchmark.");
 };
+
+/* ------------------------------------------------------------------ *
+ * Credentials
+ *
+ * One player needs one. Editing a file and restarting the container to get it
+ * was four steps and a lost page; pasting it here is one, and it takes effect
+ * on the next turn. The key is checked with a one-token request before it is
+ * kept, so a truncated paste is caught here rather than on turn one.
+ *
+ * Nothing in this file ever receives a key back from the server — a status
+ * carries the last four characters of a saved one and nothing else.
+ * ------------------------------------------------------------------ */
+
+let credsState = null;
+
+async function checkCredentials() {
+  try {
+    credsState = await (await fetch("/api/credentials")).json();
+  } catch {
+    return null;
+  }
+  renderCreds();
+  return credsState;
+}
+
+function renderCreds() {
+  if (!credsState) return;
+  const status = $("creds-status");
+  const tail = credsState.tail ? ` (${credsState.tail})` : "";
+  status.textContent = credsState.present
+    ? `Claude can run — using ${credsState.detail}${tail}.`
+    : `Not connected — ${credsState.detail}.`;
+  status.classList.toggle("bad", !credsState.present);
+  $("creds-forget").hidden = credsState.source !== "saved";
+  $("creds-where").textContent = credsState.writable
+    ? `A key saved here is written to ${credsState.path} in plain text, is ` +
+      "gitignored, and is sent nowhere but the Anthropic API. Anything that " +
+      "can read that directory can read the key."
+    : `This server cannot write ${credsState.path} — set ANTHROPIC_API_KEY in ` +
+      "the environment instead, or make that path writable.";
+  $("creds-save").disabled = !credsState.writable;
+}
+
+async function openCreds() {
+  await checkCredentials();
+  $("creds").hidden = false;
+  $("creds-key").focus();
+}
+
+$("creds-open").onclick = openCreds;
+$("creds-close").onclick = () => { $("creds").hidden = true; };
+
+$("creds-local").onclick = () => {
+  $("creds").hidden = true;
+  $("agent").value = "ollama";
+  syncAgentControls();
+  toast("Local models cost nothing per token and need no credential.");
+};
+
+$("creds-save").onclick = async () => {
+  const input = $("creds-key");
+  const key = input.value.trim();
+  const status = $("creds-status");
+  if (!key) {
+    status.textContent = "Paste a key first.";
+    status.classList.add("bad");
+    return;
+  }
+  $("creds-save").disabled = true;
+  status.classList.remove("bad");
+  status.textContent = "checking the key against the API…";
+  const data = await post("/api/credentials", { key });
+  $("creds-save").disabled = false;
+  if (!data) {
+    // post() has already said why in a toast; keep the panel open and the
+    // field filled so a corrected paste is one edit away.
+    status.textContent = lastError;
+    status.classList.add("bad");
+    return;
+  }
+  input.value = "";
+  credsState = data;
+  renderCreds();
+  toast("Claude is connected — no restart needed.");
+  setTimeout(() => { $("creds").hidden = true; }, 1200);
+};
+
+$("creds-forget").onclick = async () => {
+  try {
+    const res = await fetch("/api/credentials", { method: "DELETE" });
+    credsState = await res.json();
+    renderCreds();
+    toast("The saved key was removed.");
+  } catch (err) {
+    toast(String(err), 7000);
+  }
+};
+
+// A run that was refused for want of a credential should open the panel rather
+// than leave a toast the reader has to interpret.
+function looksLikeMissingCredential(message) {
+  return /credential|ANTHROPIC_API_KEY|api key/i.test(message || "");
+}
 
 syncAgentControls();
 syncEngineControls();
