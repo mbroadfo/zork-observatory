@@ -62,6 +62,25 @@ class TestResolutionOrder:
         source, key = credentials.resolve(clean)
         assert source == "profile" and key is None
 
+    def test_federation_is_named_as_itself(self, clean, monkeypatch):
+        """In CI there is no key anywhere — the runner vouches for the job. A
+        status that called that "a profile on this machine" would send someone
+        looking for a file that does not exist."""
+        monkeypatch.setattr(credentials, "profile",
+                            lambda: "WorkloadIdentityCredentials")
+        status = credentials.status(clean)
+        assert status["present"] is True
+        assert "federation" in status["detail"]
+        assert status["provider"] == "WorkloadIdentityCredentials"
+
+    def test_an_unfamiliar_provider_is_still_reported_as_configured(self, clean, monkeypatch):
+        """The SDK will grow paths this code has never heard of. Not knowing
+        the name is no reason to tell someone they have no credential."""
+        monkeypatch.setattr(credentials, "profile", lambda: "SomethingNewCredentials")
+        status = credentials.status(clean)
+        assert status["present"] is True
+        assert "resolved for itself" in status["detail"]
+
     def test_a_saved_key_beats_a_profile(self, clean, monkeypatch):
         monkeypatch.setattr(credentials, "profile", lambda: "CredentialsFile")
         credentials.save(KEY, clean)

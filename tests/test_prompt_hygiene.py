@@ -72,6 +72,81 @@ def test_the_journal_does_not_smuggle_strategy_in(level, hint):
     )
 
 
+@pytest.mark.parametrize("level", CLEAN)
+@pytest.mark.parametrize("noun", WORLD_NOUNS)
+def test_looking_back_does_not_smuggle_world_knowledge_in(level, noun):
+    """Being told you can search what has already been printed is interface
+    knowledge. Being told what to search for would not be."""
+    assert noun not in prompts.assemble(level, search=True).lower(), (
+        f"the lookup text added to {level!r} mentions {noun!r}"
+    )
+
+
+@pytest.mark.parametrize("level", CLEAN)
+@pytest.mark.parametrize("hint", STRATEGY_HINTS)
+def test_looking_back_does_not_smuggle_strategy_in(level, hint):
+    assert hint not in prompts.assemble(level, search=True).lower(), (
+        f"the lookup text added to {level!r} contains {hint!r}"
+    )
+
+
+@pytest.mark.parametrize("level", CLEAN)
+@pytest.mark.parametrize("noun", WORLD_NOUNS)
+def test_everything_switched_on_at_once_is_still_clean(level, noun):
+    """The combination is what a run actually sends, and it is the one nobody
+    would think to check by hand."""
+    assert noun not in prompts.assemble(level, journal=True, search=True).lower()
+
+
+class TestLookingBackSplitsAlongTheSameLine:
+    """That the record can be searched is a fact about the interface. What to
+    search for, and when it is worth a turn's thinking, is a tactic."""
+
+    def test_every_rung_is_told_the_mechanic(self):
+        for level in prompts.LEVEL_ORDER:
+            text = prompts.assemble(level, search=True).lower()
+            assert "look through" in text and "`search`" in text
+
+    def test_only_coached_is_told_how_to_use_it(self):
+        for level in CLEAN:
+            text = prompts.assemble(level, search=True).lower()
+            for idea in ["half-remember", "words that would have been printed",
+                         "spent confirming"]:
+                assert idea not in text, f"{level!r} leaks lookup coaching: {idea!r}"
+        assert "half-remember" in prompts.assemble("coached", search=True).lower()
+
+    def test_it_says_nothing_new_is_revealed(self):
+        """The property that lets this sit on the agent's side of the line: a
+        search returns what the player was already shown, further back."""
+        text = prompts.assemble("parser", search=True).lower()
+        assert "nothing new is revealed" in text
+
+    def test_cold_with_a_lookup_still_does_not_reveal_the_shape_of_the_thing(self):
+        cold = prompts.assemble("cold", search=True).lower()
+        for giveaway in ["game", "play", "score", "adventure", "puzzle", "win",
+                         "parser", "verb", "noun", "north", "inventory", "room"]:
+            assert giveaway not in cold, f"'cold' with a lookup leaks {giveaway!r}"
+
+    def test_each_combination_fingerprints_differently(self):
+        """Two runs that were told different things must never report the same
+        prompt, or the arms are indistinguishable in the trace."""
+        import hashlib
+
+        seen = set()
+        for level in prompts.LEVEL_ORDER:
+            for journal in (False, True):
+                for search in (False, True):
+                    text = prompts.assemble(level, journal, search)
+                    seen.add(hashlib.sha256(text.encode()).hexdigest())
+        assert len(seen) == len(prompts.LEVEL_ORDER) * 4
+
+    def test_assemble_agrees_with_with_journal(self):
+        """Two doors to the same prompt; a run built through either must match."""
+        for level in prompts.LEVEL_ORDER:
+            assert prompts.assemble(level) == prompts.get(level)
+            assert prompts.assemble(level, journal=True) == prompts.with_journal(level)
+
+
 class TestTheJournalSplitsAlongTheSameLine:
     """That a journal exists is interface knowledge; what to put in it is a
     tactic. An uncoached player deciding for itself what is worth writing down

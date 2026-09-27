@@ -15,6 +15,11 @@ EventType = Literal[
     "session.started",
     "turn.begin",
     "agent.thought",
+    # The player spent part of a turn looking back through what has been typed
+    # and printed, instead of typing. Recorded with the query and what it
+    # matched: a run where searching helped is only distinguishable from one
+    # where it did not if you can see what was asked for.
+    "agent.search",
     "command.issued",
     "observation",
     "state.snapshot",

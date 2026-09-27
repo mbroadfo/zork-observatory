@@ -578,6 +578,13 @@ function addEntry(command, response, kind, outcome) {
   $("t-count").textContent = `${++entryCount} exchanges`;
 }
 
+function lookup(text) {
+  const el = document.createElement("div");
+  el.className = "lookup";
+  el.textContent = text;
+  append(el);
+}
+
 function note(text, isError) {
   const el = document.createElement("div");
   el.className = "event-note" + (isError ? " err" : "");
@@ -1070,6 +1077,16 @@ function handle(event) {
       );
       break;
 
+    case "agent.search": {
+      // Part of a turn spent reading rather than typing. Shown inline so the
+      // command that follows can be read against what it just looked up.
+      const where = p.hits
+        ? `${p.hits} of ${p.of} turns — ${(p.turns || []).map((t) => `#${t}`).join(" ")}`
+        : `nothing in ${p.of} turns`;
+      lookup(`⌕ looked back for "${p.query}" · ${where}`);
+      break;
+    }
+
     case "run.handoff":
       $("r-turn").textContent = p.turn;
       note(
@@ -1322,6 +1339,8 @@ function syncAgentControls() {
   $("info").style.display = claude || local ? "" : "none";
   $("notebook").style.display = claude || local ? "" : "none";
   $("journal").style.display = claude || local ? "" : "none";
+  $("search").style.display = claude || local ? "" : "none";
+  $("maxtok").style.display = claude || local ? "" : "none";
   $("input-row").classList.toggle("on", agent === "human");
   if (local) loadLocalModels();
 }
@@ -1376,6 +1395,7 @@ $("new-run").onclick = async () => {
     runs: parseInt($("runs").value, 10) || 1,
     notebook: llm ? $("notebook").value : "off",
     journal: llm && $("journal").value === "on",
+    search: llm && $("search").value === "on",
     engine: $("engine").value,
     rom: $("rom").value || null,
     agent: $("agent").value,
@@ -1384,6 +1404,9 @@ $("new-run").onclick = async () => {
     think: $("think").value,
     info_level: $("info").value,
     max_turns: parseInt($("turns").value, 10) || 200,
+    max_cost_usd: parseFloat($("ceiling").value) || 0,
+    stall_limit: parseInt($("stall").value, 10) || 0,
+    max_tokens: llm ? parseInt($("maxtok").value, 10) || 0 : 0,
     lives: parseInt($("lives").value, 10) || 0,
     delay: 0.35,
   };
@@ -1438,9 +1461,13 @@ $("handover").onclick = async () => {
     temperature: parseFloat($("temp").value),
     history_turns: 30,
     journal: llm && $("journal").value === "on",
+    search: llm && $("search").value === "on",
     notebook: llm ? $("notebook").value : "off",
     inherit_transcript: inherits,
     add_turns: parseInt($("turns").value, 10) || 200,
+    max_cost_usd: parseFloat($("ceiling").value) || 0,
+    stall_limit: parseInt($("stall").value, 10) || 0,
+    max_tokens: llm ? parseInt($("maxtok").value, 10) || 0 : 0,
     delay: 0.35,
   });
   // The game still has its previous player — the route checks before swapping —

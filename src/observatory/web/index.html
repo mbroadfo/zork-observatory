@@ -66,6 +66,20 @@
     </select>
     <input type="number" id="turns" value="200" min="1" max="5000" size="4"
            title="Turn BUDGET — the game has no turn limit. Runs stopped by it are marked censored." style="width:70px">
+    <input type="number" id="ceiling" value="0" min="0" max="100" step="0.25" size="4"
+           title="Stop the run once it has cost this much, across every player that has had it. 0 means no ceiling. A run stopped this way is marked censored, like the turn budget." style="width:74px" placeholder="$ cap">
+    <select id="stall" title="End a run that has stopped finding new rooms. The third budget: a run that can neither die nor progress otherwise spends its whole turn allowance walking into the same refusal.">
+      <option value="0" selected>stall: never stop</option>
+      <option value="40">stall: 40 turns</option>
+      <option value="75">stall: 75 turns</option>
+      <option value="150">stall: 150 turns</option>
+    </select>
+    <select id="maxtok" title="Ceiling on what the player may say per turn. Reasoning was 55% of the bill on the 2026-09-27 opus run, so this is the biggest cost lever there is — and an experimental variable, since thinking less may play worse." style="display:none">
+      <option value="0" selected>reply: model default</option>
+      <option value="700">reply: ≤700 tok</option>
+      <option value="400">reply: ≤400 tok</option>
+      <option value="250">reply: ≤250 tok</option>
+    </select>
     <select id="lives" title="Times the world may be rolled back after a death. The agent keeps its memory across a rollback.">
       <option value="0" selected>ironman</option>
       <option value="1">1 life</option>
@@ -86,6 +100,10 @@
     <select id="journal" title="Let the player write a line of its own to keep, on any turn it chooses. Shown back beside the transcript, never instead of it." style="display:none">
       <option value="off" selected>journal: none</option>
       <option value="on">journal: keep one</option>
+    </select>
+    <select id="search" title="Let the player look back through everything typed and printed, past the transcript window. It spends a request per lookup and is recorded in the trace." style="display:none">
+      <option value="on" selected>lookup: can search back</option>
+      <option value="off">lookup: window only</option>
     </select>
     <button id="new-run" class="primary">New run</button>
   </div>

@@ -25,6 +25,11 @@ from .journal import Journal
 # tests/test_prompt_hygiene.py enforces it.
 DEFAULT_INFO_LEVEL = "parser"
 
+# Lookups allowed within one turn. Each one is another request with the whole
+# prompt again, so this is the difference between a player that checks
+# something and a player that researches instead of playing.
+DEFAULT_MAX_SEARCHES = 2
+
 # Kept as module-level names because the hygiene tests and older callers refer
 # to them; both track the default rung.
 SYSTEM = prompts.get(DEFAULT_INFO_LEVEL)
@@ -103,6 +108,8 @@ class ClaudeAgent(Agent):
         max_tokens: int = 2000,
         info_level: str = DEFAULT_INFO_LEVEL,
         journal: Journal | None = None,
+        search: bool = False,
+        max_searches: int = DEFAULT_MAX_SEARCHES,
         api_key: str | None = None,
     ) -> None:
         import anthropic
@@ -113,10 +120,9 @@ class ClaudeAgent(Agent):
         self.max_tokens = max_tokens
         self.info_level = info_level
         self.journal = journal
-        self.system = (
-            prompts.with_journal(info_level) if journal is not None
-            else prompts.get(info_level)
-        )
+        self.search = search
+        self.max_searches = max_searches
+        self.system = prompts.assemble(info_level, journal is not None, search)
         self.name = f"claude:{model}" + ("" if info_level == DEFAULT_INFO_LEVEL else f"/{info_level}")
         # A key passed in beats everything. Otherwise: the environment, then
         # one saved from the page, then whatever the SDK finds for itself.
@@ -182,60 +188,80 @@ class ClaudeAgent(Agent):
             self.memory, ctx, self.history_turns, self.journal)}]
 
     def _schema(self) -> dict[str, Any]:
-        return {"type": "json_schema", "schema": llm.move_fields(self.journal is not None)}
+        return {
+            "type": "json_schema",
+            "schema": llm.move_fields(self.journal is not None, self.search),
+        }
 
     # --- play ------------------------------------------------------------
 
     async def act(self, ctx: TurnContext) -> AgentAction:
+        """One turn, which may take more than one request.
+
+        A player allowed to look back can spend a request asking rather than
+        answering. The loop below is that: ask, and if the reply is a lookup
+        instead of a command, answer the lookup and ask again with both in
+        view. Bounded by `max_searches`, because the turn has to end.
+        """
         import anthropic
 
         started = time.perf_counter()
-        try:
-            response = await self._client.messages.create(
-                model=self.model,
-                max_tokens=self.max_tokens,
-                system=[
-                    {
-                        "type": "text",
-                        "text": self.system,
-                        "cache_control": {"type": "ephemeral"},
-                    }
-                ],
-                output_config=output_config(self.model, self.effort, self._schema()),
-                messages=self._messages(ctx),
-            )
-        except anthropic.APIStatusError as exc:
-            return AgentAction(
-                command="look",
-                thought=f"[api error {exc.status_code}: {exc.message}]",
-                meta={"error": True},
-            )
-        except anthropic.APIConnectionError as exc:
-            return AgentAction(command="look", thought=f"[connection error: {exc}]", meta={"error": True})
+        messages = self._messages(ctx)
+        searches: list[dict[str, Any]] = []
+        cost = 0.0
+
+        while True:
+            try:
+                response = await self._client.messages.create(
+                    model=self.model,
+                    max_tokens=self.max_tokens,
+                    system=[
+                        {
+                            "type": "text",
+                            "text": self.system,
+                            "cache_control": {"type": "ephemeral"},
+                        }
+                    ],
+                    output_config=output_config(self.model, self.effort, self._schema()),
+                    messages=messages,
+                )
+            except anthropic.APIStatusError as exc:
+                return AgentAction(
+                    command="look",
+                    thought=f"[api error {exc.status_code}: {exc.message}]",
+                    meta={"error": True},
+                )
+            except anthropic.APIConnectionError as exc:
+                return AgentAction(command="look", thought=f"[connection error: {exc}]", meta={"error": True})
+
+            if response.stop_reason == "refusal":
+                detail = getattr(response.stop_details, "explanation", "") if response.stop_details else ""
+                return AgentAction(command="look", thought=f"[refusal: {detail}]", meta={"error": True})
+
+            cost += estimate_cost(self.model, response.usage)
+            self._totals["input_tokens"] += getattr(response.usage, "input_tokens", 0) or 0
+            self._totals["output_tokens"] += getattr(response.usage, "output_tokens", 0) or 0
+            self._totals["cache_read_tokens"] += getattr(response.usage, "cache_read_input_tokens", 0) or 0
+            self._totals["calls"] += 1
+
+            text = next((b.text for b in response.content if b.type == "text"), "")
+            journalled = query = ""
+            try:
+                data = json.loads(text)
+                command = llm.clean_command(str(data.get("command", "look")))
+                reasoning = str(data.get("reasoning", "")).strip()
+                journalled = str(data.get("journal") or "").strip()
+                query = str(data.get("search") or "").strip()
+            except (json.JSONDecodeError, AttributeError):
+                command, reasoning = "look", f"[unparseable response: {text[:200]}]"
+
+            done = self._lookup(ctx, query, searches, messages, text)
+            if done:
+                break
 
         latency_ms = (time.perf_counter() - started) * 1000
-
-        if response.stop_reason == "refusal":
-            detail = getattr(response.stop_details, "explanation", "") if response.stop_details else ""
-            return AgentAction(command="look", thought=f"[refusal: {detail}]", meta={"error": True})
-
-        cost = estimate_cost(self.model, response.usage)
-        self._totals["input_tokens"] += getattr(response.usage, "input_tokens", 0) or 0
-        self._totals["output_tokens"] += getattr(response.usage, "output_tokens", 0) or 0
-        self._totals["cache_read_tokens"] += getattr(response.usage, "cache_read_input_tokens", 0) or 0
         self._totals["cost_usd"] += cost
-        self._totals["calls"] += 1
         self._totals["latency_ms_total"] += latency_ms
-
-        text = next((b.text for b in response.content if b.type == "text"), "")
-        journalled = ""
-        try:
-            data = json.loads(text)
-            command = llm.clean_command(str(data.get("command", "look")))
-            reasoning = str(data.get("reasoning", "")).strip()
-            journalled = str(data.get("journal") or "").strip()
-        except (json.JSONDecodeError, AttributeError):
-            command, reasoning = "look", f"[unparseable response: {text[:200]}]"
 
         return AgentAction(
             command=command or "look",
@@ -249,8 +275,34 @@ class ClaudeAgent(Agent):
                 "output_tokens": getattr(response.usage, "output_tokens", 0),
                 "cache_read_tokens": getattr(response.usage, "cache_read_input_tokens", 0),
                 **({"journal": journalled} if journalled and self.journal is not None else {}),
+                **({"searches": searches} if searches else {}),
             },
         )
+
+    def _lookup(
+        self,
+        ctx: TurnContext,
+        query: str,
+        searches: list[dict[str, Any]],
+        messages: list[dict[str, Any]],
+        reply: str,
+    ) -> bool:
+        """Answer a lookup in place. True when the turn should end instead.
+
+        Shared by shape with the local player: the record is consulted here,
+        the wording comes from llm.py, and both transports keep the same
+        accounting of what was asked for.
+        """
+        if not query or ctx.recall is None or len(searches) >= self.max_searches:
+            return True
+        hits = ctx.recall.search(query)
+        searches.append({"query": query, "hits": len(hits),
+                         "turns": [h.exchange.turn for h in hits]})
+        left = self.max_searches - len(searches)
+        messages.append({"role": "assistant", "content": reply})
+        messages.append({"role": "user", "content": llm.search_reply(
+            ctx.recall.render(query, hits), ctx, left)})
+        return False
 
     async def reflect(self, ctx: TurnContext, cause: str) -> str | None:
         """One extra call, at the moment the run is about to be rolled back.
@@ -298,6 +350,8 @@ class ClaudeAgent(Agent):
             # Which of the credential paths this run used. Never the credential.
             "credential_source": getattr(self, "credential_source", "unknown"),
             "journal": getattr(self, "journal", None) is not None,
+            "search": getattr(self, "search", False),
+            "max_searches": getattr(self, "max_searches", 0),
             "system_prompt": self.system,
             # Of the prompt actually sent, which the journal adds to. A run
             # whose system prompt differs must not report the same fingerprint

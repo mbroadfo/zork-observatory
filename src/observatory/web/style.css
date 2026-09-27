@@ -344,6 +344,16 @@ main.no-right #hide-right { color: var(--amber); border-color: var(--amber-soft)
 }
 .event-note.err { color: var(--red); }
 
+/* A turn spent reading rather than typing. Dimmer than the game's own text:
+   it is the player talking to the record, not to the world. */
+.lookup {
+  color: var(--dim);
+  font-size: 11px;
+  margin: 5px 0 5px 10px;
+  padding-left: 8px;
+  border-left: 2px solid var(--line);
+}
+
 #input-row {
   display: none;
   gap: 6px;

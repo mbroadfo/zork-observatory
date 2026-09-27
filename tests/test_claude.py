@@ -14,6 +14,9 @@ or nothing answering.
 
 from __future__ import annotations
 
+import json
+from types import SimpleNamespace
+
 import anthropic
 import pytest
 
@@ -26,7 +29,13 @@ except ModuleNotFoundError:  # pragma: no cover - older anthropic
     import httpx  # type: ignore[no-redef]
 
 from observatory import credentials
-from observatory.agents.claude_agent import KEY_VARS, ClaudeAgent, takes_effort
+from observatory.agents.base import TurnContext
+from observatory.agents.claude_agent import (
+    KEY_VARS,
+    ClaudeAgent,
+    estimate_cost,
+    takes_effort,
+)
 
 
 def unset_keys(monkeypatch) -> None:
@@ -173,6 +182,115 @@ class TestWhatTheApiSays:
         )
         problem = await player.preflight()
         assert problem and "TypeError" in problem
+
+
+class TestLookingBack:
+    """The same round trip the local player does, over the hosted transport:
+    a reply carrying a lookup is answered from the record and the question put
+    again, in the same turn."""
+
+    def reply(self, **body):
+        """A stand-in for a structured response, with usage the cost code reads."""
+        text = json.dumps({"reasoning": "thinking", **body})
+        return SimpleNamespace(
+            content=[SimpleNamespace(type="text", text=text)],
+            stop_reason="end_turn",
+            stop_details=None,
+            usage=SimpleNamespace(input_tokens=400, output_tokens=30,
+                                  cache_read_input_tokens=0,
+                                  cache_creation_input_tokens=0),
+        )
+
+    def player(self, monkeypatch, *replies):
+        from observatory.world.recall import Exchange, Recall
+
+        unset_keys(monkeypatch)
+        agent = ClaudeAgent(api_key="sk-test", search=True)
+        queued = list(replies)
+        agent.sent = []   # type: ignore[attr-defined]
+
+        async def create(**body):
+            agent.sent.append(body)   # type: ignore[attr-defined]
+            return queued.pop(0)
+
+        monkeypatch.setattr(agent._client.messages, "create", create)
+        record = Recall([
+            Exchange(turn=7, command="examine grating",
+                     response="The grating is locked.", room="Clearing"),
+        ])
+        return agent, TurnContext(turn=40, observation="A small room.", score=25,
+                                  moves=40, recall=record)
+
+    async def test_a_lookup_is_answered_and_the_turn_continues(self, monkeypatch):
+        agent, ctx = self.player(
+            monkeypatch,
+            self.reply(command="", search="grating"),
+            self.reply(command="unlock grating"),
+        )
+        action = await agent.act(ctx)
+
+        assert action.command == "unlock grating"
+        assert len(agent.sent) == 2       # type: ignore[attr-defined]
+        assert action.meta["searches"] == [{"query": "grating", "hits": 1, "turns": [7]}]
+
+    async def test_the_results_come_back_as_a_new_user_turn(self, monkeypatch):
+        """With the model's own reply kept in between, so the exchange reads as
+        a conversation rather than an edited prompt."""
+        agent, ctx = self.player(
+            monkeypatch,
+            self.reply(command="", search="grating"),
+            self.reply(command="unlock grating"),
+        )
+        await agent.act(ctx)
+
+        messages = agent.sent[1]["messages"]   # type: ignore[attr-defined]
+        assert [m["role"] for m in messages] == ["user", "assistant", "user"]
+        assert "The grating is locked." in messages[-1]["content"]
+
+    async def test_cost_and_tokens_cover_every_request_of_the_turn(self, monkeypatch):
+        """Two requests cost two requests. Charging for one would make lookups
+        look free, and they are the most expensive thing here."""
+        agent, ctx = self.player(
+            monkeypatch,
+            self.reply(command="", search="grating"),
+            self.reply(command="unlock grating"),
+        )
+        action = await agent.act(ctx)
+
+        assert agent.usage()["calls"] == 2
+        assert agent.usage()["input_tokens"] == 800
+        one_call = estimate_cost("claude-opus-5", SimpleNamespace(
+            input_tokens=400, output_tokens=30,
+            cache_read_input_tokens=0, cache_creation_input_tokens=0))
+        assert action.meta["cost_usd"] == pytest.approx(one_call * 2, rel=1e-6)
+
+    async def test_the_budget_binds(self, monkeypatch):
+        agent, ctx = self.player(
+            monkeypatch,
+            *[self.reply(command="", search=f"thing {i}") for i in range(4)],
+        )
+        agent.max_searches = 2
+        action = await agent.act(ctx)
+
+        assert len(action.meta["searches"]) == 2
+        assert len(agent.sent) == 3        # type: ignore[attr-defined]
+        assert action.command == "look"    # it never typed anything
+
+    async def test_without_a_record_a_lookup_is_ignored(self, monkeypatch):
+        agent, ctx = self.player(
+            monkeypatch, self.reply(command="north", search="grating"))
+        action = await agent.act(TurnContext(turn=1, observation="x", score=0, moves=0))
+
+        assert action.command == "north"
+        assert len(agent.sent) == 1        # type: ignore[attr-defined]
+
+    def test_the_prompt_and_the_schema_both_change_when_it_is_on(self, monkeypatch):
+        unset_keys(monkeypatch)
+        on = ClaudeAgent(api_key="k", search=True).describe()
+        off = ClaudeAgent(api_key="k").describe()
+
+        assert on["search"] is True and off["search"] is False
+        assert on["system_fingerprint"] != off["system_fingerprint"]
 
 
 class TestTheRestOfTheWiring:

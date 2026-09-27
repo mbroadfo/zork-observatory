@@ -12,6 +12,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..world.recall import Recall
 from .journal import Journal
 from .memory import AgentMemory
 
@@ -25,6 +26,10 @@ class TurnContext:
     score: int
     moves: int
     transcript: list[tuple[str, str]] = field(default_factory=list)  # (command, response)
+    # Everything typed and printed that this player is entitled to look through
+    # — the whole run, or only its own turns after a cold handoff. None when
+    # searching is switched off, which is the control arm for having it.
+    recall: Recall | None = None
     valid_actions: list[str] | None = None
     life: int = 1          # how many times the world has been restarted under it
     lives_left: int = 0

@@ -161,7 +161,9 @@ class NewSession(BaseModel):
     think: str = "default"       # ollama: default | off | on | low | medium | high
     info_level: str = "parser"
     max_turns: int = 400
-    max_cost_usd: float = 0.0
+    max_cost_usd: float = 0.0    # 0 = no ceiling
+    stall_limit: int = 0         # end a run that stops finding new rooms
+    max_tokens: int = 0          # 0 = the agent's own default
     lives: int = 0
     delay: float = 0.35
     seed: int = 12345
@@ -169,6 +171,7 @@ class NewSession(BaseModel):
     temperature: float = DEFAULT_TEMPERATURE   # ollama: lower wanders less
     history_turns: int = DEFAULT_HISTORY   # exchanges of transcript per turn
     journal: bool = False                  # let the agent keep a record of its own
+    search: bool = False                   # let it look back past its window
     valid_actions: bool = False
     record: bool = True
     runs: int = 1                # chained runs; each starts from the first move
@@ -191,12 +194,21 @@ class Handoff(BaseModel):
     temperature: float = DEFAULT_TEMPERATURE
     history_turns: int = DEFAULT_HISTORY
     journal: bool = False
+    # Whether it may look back through everything typed and printed, including
+    # the turns it did not play — unless `inherit_transcript` withheld them, in
+    # which case the search is bounded the same way the window is.
+    search: bool = True
     notebook: str = "off"
     # Whether the new player is shown the turns it did not play. See
     # Session.handoff — this is the difference between a demonstration and a
     # measurement.
     inherit_transcript: bool = True
     add_turns: int = 200         # budget from here, not from turn zero
+    # Ceilings for the incoming player. The cost one spans the whole run, not
+    # this leg: a budget that reset on every handoff would be no budget.
+    max_cost_usd: float = 0.0
+    stall_limit: int = 0
+    max_tokens: int = 0
     delay: float = 0.35
     start: bool = True           # begin playing at once
 
@@ -411,6 +423,8 @@ async def launch(req: NewSession, series: dict[str, int] | None = None) -> Sessi
             num_ctx=req.num_ctx,
             temperature=req.temperature,
             journal=req.journal,
+            search=req.search,
+            max_tokens=req.max_tokens or None,
         )
     except Exception as exc:
         engine.close()
@@ -449,6 +463,7 @@ async def launch(req: NewSession, series: dict[str, int] | None = None) -> Sessi
         config=SessionConfig(
             max_turns=max_turns,
             max_cost_usd=req.max_cost_usd,
+            stall_limit=req.stall_limit,
             lives=req.lives,
             delay=req.delay,
             collect_valid_actions=req.valid_actions,
@@ -519,6 +534,8 @@ async def handoff(req: Handoff) -> JSONResponse:
             num_ctx=req.num_ctx,
             temperature=req.temperature,
             journal=req.journal,
+            search=req.search,
+            max_tokens=req.max_tokens or None,
         )
     except Exception as exc:
         return JSONResponse({"error": f"{type(exc).__name__}: {exc}"}, status_code=400)
@@ -539,6 +556,10 @@ async def handoff(req: Handoff) -> JSONResponse:
             fresh=req.notebook == "new",
         )
 
+    if req.max_cost_usd:
+        session.config.max_cost_usd = req.max_cost_usd
+    if req.stall_limit:
+        session.config.stall_limit = req.stall_limit
     await session.handoff(
         agent,
         inherit_transcript=req.inherit_transcript,

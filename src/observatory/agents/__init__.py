@@ -61,6 +61,14 @@ def build_agent(kind: str, **kwargs) -> Agent:
     # Off unless asked for. A player that keeps no journal is the control arm
     # for keeping one, and it is the one that has been measured.
     journal = Journal() if kwargs.get("journal") else None
+    # Likewise off unless asked for: a player that cannot look past its window
+    # is the control arm for one that can.
+    search = bool(kwargs.get("search"))
+    # The ceiling on what a player may say per turn. None keeps each agent's
+    # own default. It is a cost lever as much as a safety one: on the opus run
+    # of 2026-09-27, 274 output tokens of reasoning per turn were 55% of the
+    # bill, against ~1,100 input tokens that were half cache-read.
+    max_tokens = kwargs.get("max_tokens")
     if kind == "claude":
         from .claude_agent import ClaudeAgent
 
@@ -70,6 +78,8 @@ def build_agent(kind: str, **kwargs) -> Agent:
             history_turns=history,
             info_level=kwargs.get("info_level", "parser"),
             journal=journal,
+            search=search,
+            **({"max_tokens": max_tokens} if max_tokens else {}),
         )
     if kind == "ollama":
         from .ollama_agent import OllamaAgent
@@ -83,5 +93,7 @@ def build_agent(kind: str, **kwargs) -> Agent:
             num_ctx=kwargs.get("num_ctx") or DEFAULT_NUM_CTX,
             temperature=kwargs.get("temperature", DEFAULT_TEMPERATURE),
             journal=journal,
+            search=search,
+            **({"max_tokens": max_tokens} if max_tokens else {}),
         )
     raise ValueError(f"Unknown agent: {kind!r} (expected {', '.join(AGENTS)})")

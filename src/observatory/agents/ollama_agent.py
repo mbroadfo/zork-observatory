@@ -60,6 +60,11 @@ PLAIN_MODELS = ("gpt-oss",)
 Transport = Callable[[str, str, dict[str, Any] | None], Awaitable[dict[str, Any]]]
 
 
+# Lookups allowed within one turn. Each is another full request, which on a
+# local model is seconds rather than tokens.
+DEFAULT_MAX_SEARCHES = 2
+
+
 class OllamaError(Exception):
     def __init__(self, message: str, status: int | None = None) -> None:
         super().__init__(message)
@@ -143,6 +148,8 @@ class OllamaAgent(Agent):
         seed: int | None = None,
         max_tokens: int | None = DEFAULT_MAX_TOKENS,
         journal: Journal | None = None,
+        search: bool = False,
+        max_searches: int = DEFAULT_MAX_SEARCHES,
         transport: Transport | None = None,
     ) -> None:
         if not model:
@@ -152,12 +159,12 @@ class OllamaAgent(Agent):
         self.history_turns = history_turns
         self.info_level = info_level
         self.journal = journal
-        # A player with a journal is being told something the others are not,
-        # so it is a different prompt and fingerprints as one.
-        self.system = (
-            prompts.with_journal(info_level) if journal is not None
-            else prompts.get(info_level)
-        )
+        self.search = search
+        self.max_searches = max_searches
+        # A player with a journal, or with somewhere to look things up, is
+        # being told something the others are not, so it is a different prompt
+        # and fingerprints as one.
+        self.system = prompts.assemble(info_level, journal is not None, search)
         # None leaves the model's own default; False/True or low/medium/high
         # (the gpt-oss form) set it. Models that cannot think reject the field,
         # and that is remembered rather than retried every turn.
@@ -281,8 +288,8 @@ class OllamaAgent(Agent):
     # --- play ------------------------------------------------------------
 
     @staticmethod
-    def _parse(message: dict[str, Any]) -> tuple[str, str, str, bool]:
-        """(command, reasoning, journal, structured) from a reply."""
+    def _parse(message: dict[str, Any]) -> tuple[str, str, str, str, bool]:
+        """(command, reasoning, journal, search, structured) from a reply."""
         text = (message.get("content") or "").strip()
         try:
             parsed = json.loads(text)
@@ -290,6 +297,7 @@ class OllamaAgent(Agent):
                 llm.clean_command(str(parsed.get("command", ""))),
                 str(parsed.get("reasoning", "")).strip(),
                 str(parsed.get("journal") or "").strip(),
+                str(parsed.get("search") or "").strip(),
                 True,
             )
         except (json.JSONDecodeError, AttributeError):
@@ -298,68 +306,95 @@ class OllamaAgent(Agent):
             # The first line is still what it chose to type; there is no
             # journal line to recover, and inventing one from the prose would
             # put words the model did not choose into a permanent record.
-            return llm.clean_command(text), "[reply was not in the requested format]", "", False
+            return llm.clean_command(text), "[reply was not in the requested format]", "", "", False
 
     async def act(self, ctx: TurnContext) -> AgentAction:
+        """One turn, which may take more than one request.
+
+        A player allowed to look back can spend a request asking instead of
+        answering. Each pass of the loop is one request; a reply that carries a
+        lookup rather than a command is answered, the results are appended to
+        this same turn's prompt, and the question is put again. Everything
+        counted here — tokens, latency, retries — accumulates across those
+        passes, because they were all one turn.
+        """
         prompt = llm.turn_prompt(self.memory, ctx, self.history_turns, self.journal)
-        crowded = self.context_warning(len(prompt) + len(self.system))
         started = time.perf_counter()
-        schema = llm.move_fields(self.journal is not None)
-        retried = ""
-        try:
-            data = await self._chat(prompt, schema, self.max_tokens)
-        except OllamaError as exc:
-            # One more attempt before the turn is spent. A local server fails
-            # in ways a hosted one does not — Ollama 0.13.5 mangles gpt-oss
-            # replies in its own parser, intermittently — and a turn lost to
-            # that is a turn of the run reported as if the player had played
-            # `look`. The second failure is the honest one.
-            retried = str(exc)
+        schema = llm.move_fields(self.journal is not None, self.search)
+        searches: list[dict[str, Any]] = []
+        meta: dict[str, Any] = {"model": self.model, "cost_usd": 0.0}
+        inp = out = 0
+
+        while True:
+            crowded = self.context_warning(len(prompt) + len(self.system))
+            retried = ""
             try:
                 data = await self._chat(prompt, schema, self.max_tokens)
-            except OllamaError as second:
-                return AgentAction(
-                    command="look", thought=f"[ollama error: {second}]",
-                    meta={"error": True, "first_error": retried},
-                )
-        inp, out = self._count(data, (time.perf_counter() - started) * 1000)
-
-        message = data.get("message") or {}
-        command, reasoning, journalled, structured = self._parse(message)
-        thinking = message.get("thinking") or ""
-        overran = data.get("done_reason") == "length" and not command
-
-        meta: dict[str, Any] = {"model": self.model, "cost_usd": 0.0}
-        if retried:
-            meta["retried_after"] = retried
-        if crowded:
-            meta["context_warning"] = crowded
-        if thinking:
-            # Kept whole in the trace: a model that talked itself in circles
-            # is only diagnosable from what it said.
-            meta["thinking_chars"] = len(thinking)
-            meta["thinking"] = thinking
-        if data.get("load_duration", 0) > 1e9:
-            meta["load_ms"] = round(data["load_duration"] / 1e6)
-
-        if overran:
-            # It hit the ceiling before answering — in practice a thinking
-            # loop. Ask again for this turn only, without thinking, and say so:
-            # the move that follows was not made under the configured setting.
-            meta["overran"] = True
-            meta["overrun_tokens"] = out
-            retry_started = time.perf_counter()
-            try:
-                data = await self._chat(prompt, schema, self.max_tokens, think=False, override=True)
             except OllamaError as exc:
-                data = {}
-                reasoning = f"[ran past {out} tokens without answering; retry failed: {exc}]"
-            if data:
-                i2, o2 = self._count(data, (time.perf_counter() - retry_started) * 1000)
-                inp, out = inp + i2, out + o2
-                command, reasoning, journalled, structured = self._parse(data.get("message") or {})
-                if data.get("done_reason") == "length" and not command:
-                    reasoning = "[ran past the output ceiling twice without answering]"
+                # One more attempt before the turn is spent. A local server
+                # fails in ways a hosted one does not — Ollama 0.13.5 mangles
+                # gpt-oss replies in its own parser, intermittently — and a turn
+                # lost to that is a turn of the run reported as if the player
+                # had played `look`. The second failure is the honest one.
+                retried = str(exc)
+                try:
+                    data = await self._chat(prompt, schema, self.max_tokens)
+                except OllamaError as second:
+                    return AgentAction(
+                        command="look", thought=f"[ollama error: {second}]",
+                        meta={"error": True, "first_error": retried,
+                              **({"searches": searches} if searches else {})},
+                    )
+            i1, o1 = self._count(data, (time.perf_counter() - started) * 1000)
+            inp, out = inp + i1, out + o1
+
+            message = data.get("message") or {}
+            command, reasoning, journalled, query, structured = self._parse(message)
+            thinking = message.get("thinking") or ""
+            overran = data.get("done_reason") == "length" and not command
+
+            if retried:
+                meta["retried_after"] = retried
+            if crowded:
+                meta["context_warning"] = crowded
+            if thinking:
+                # Kept whole in the trace: a model that talked itself in circles
+                # is only diagnosable from what it said.
+                meta["thinking_chars"] = len(thinking)
+                meta["thinking"] = thinking
+            if data.get("load_duration", 0) > 1e9:
+                meta["load_ms"] = round(data["load_duration"] / 1e6)
+
+            if overran:
+                # It hit the ceiling before answering — in practice a thinking
+                # loop. Ask again for this turn only, without thinking, and say
+                # so: the move that follows was not made under the configured
+                # setting.
+                meta["overran"] = True
+                meta["overrun_tokens"] = out
+                retry_started = time.perf_counter()
+                try:
+                    data = await self._chat(prompt, schema, self.max_tokens, think=False, override=True)
+                except OllamaError as exc:
+                    data = {}
+                    reasoning = f"[ran past {out} tokens without answering; retry failed: {exc}]"
+                if data:
+                    i2, o2 = self._count(data, (time.perf_counter() - retry_started) * 1000)
+                    inp, out = inp + i2, out + o2
+                    command, reasoning, journalled, query, structured = self._parse(
+                        data.get("message") or {})
+                    if data.get("done_reason") == "length" and not command:
+                        reasoning = "[ran past the output ceiling twice without answering]"
+
+            if not query or ctx.recall is None or len(searches) >= self.max_searches:
+                break
+            hits = ctx.recall.search(query)
+            searches.append({"query": query, "hits": len(hits),
+                             "turns": [h.exchange.turn for h in hits]})
+            prompt += llm.search_reply(
+                ctx.recall.render(query, hits), ctx,
+                self.max_searches - len(searches),
+            )
 
         meta.update({
             "latency_ms": round((time.perf_counter() - started) * 1000),
@@ -371,10 +406,12 @@ class OllamaAgent(Agent):
         if not command:
             meta["error"] = True
         if journalled and self.journal is not None:
-            # Carried on the action rather than written here. The session
-            # files it once the command has run, so the entry lands with the
-            # engine's verdict on the turn attached to it.
+            # Carried on the action rather than written here. The session files
+            # it once the command has run, so the entry lands with the engine's
+            # verdict on the turn attached to it.
             meta["journal"] = journalled
+        if searches:
+            meta["searches"] = searches
 
         return AgentAction(command=command or "look", thought=reasoning, meta=meta)
 
@@ -408,6 +445,8 @@ class OllamaAgent(Agent):
             "options": self._options(self.max_tokens),
             "history_turns": self.history_turns,
             "info_level": self.info_level,
+            "search": self.search,
+            "max_searches": self.max_searches,
             "journal": self.journal is not None,
             "system_prompt": self.system,
             "system_fingerprint": hashlib.sha256(self.system.encode()).hexdigest()[:12],

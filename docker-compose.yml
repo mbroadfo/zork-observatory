@@ -36,6 +36,19 @@ services:
       # standing in for the API. Both are honoured by the SDK on their own.
       - ANTHROPIC_AUTH_TOKEN
       - ANTHROPIC_BASE_URL
+      # Workload identity federation, for running this in CI or on a cloud VM:
+      # the runner issues a short-lived OIDC token, the SDK trades it for an
+      # access token, and no key is stored anywhere. Irrelevant on a desktop,
+      # which has nothing to issue one — passed through so that a GitHub
+      # Actions or cloud run needs no change here.
+      - ANTHROPIC_FEDERATION_RULE_ID
+      - ANTHROPIC_ORGANIZATION_ID
+      - ANTHROPIC_IDENTITY_TOKEN
+      - ANTHROPIC_IDENTITY_TOKEN_FILE
+      - ANTHROPIC_WORKSPACE_ID
+      # A named profile, if one exists on the host and is mounted in.
+      - ANTHROPIC_PROFILE
+      - ANTHROPIC_CONFIG_DIR
       # The local model server below. To use an Ollama installed on the host
       # instead, set OLLAMA_HOST=http://host.docker.internal:11434.
       - OLLAMA_HOST=${OLLAMA_HOST:-http://ollama:11434}

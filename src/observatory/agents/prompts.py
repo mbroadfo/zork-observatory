@@ -165,11 +165,47 @@ the condition will send you back to repeat it somewhere it cannot work, and \
 you will not be able to tell why it is failing."""
 
 
+SEARCH_INTERFACE = """
+Everything typed in this session, and everything printed back, is kept and you \
+can look through it. Put a word or phrase in the `search` field of your reply \
+and leave `command` empty: you will be shown the turns that mention it, in \
+full, and then asked again for your command. Nothing is summarised for you and \
+nothing new is revealed — it is what you have already been shown, further back \
+than you can currently see."""
+
+SEARCH_DISCIPLINE = """
+Look back when you half-remember reading something and the wording matters — \
+what exactly was said, or where you were when you saw it. Search for the words \
+that would have been printed rather than for what you have concluded. Finding \
+nothing means only that it has not been typed or printed yet, and a lookup \
+spent confirming what is already in front of you is a turn's thinking spent on \
+nothing."""
+
+
 def with_journal(level: str) -> str:
     """The prompt for `level`, plus the journal's instructions."""
     text = get(level) + JOURNAL_INTERFACE
     if level == "coached":
         text += JOURNAL_DISCIPLINE
+    return text
+
+
+def assemble(level: str, journal: bool = False, search: bool = False) -> str:
+    """The system prompt for `level` with whichever affordances are switched on.
+
+    The instructions for each are appended in a fixed order so that two runs
+    with the same settings fingerprint identically, and two runs with different
+    settings never do.
+    """
+    text = get(level)
+    if journal:
+        text += JOURNAL_INTERFACE
+        if level == "coached":
+            text += JOURNAL_DISCIPLINE
+    if search:
+        text += SEARCH_INTERFACE
+        if level == "coached":
+            text += SEARCH_DISCIPLINE
     return text
 
 

@@ -112,12 +112,27 @@ def env_credential() -> tuple[str, str] | None:
     return None
 
 
+# What the SDK's credential providers are called, in words. Federation is the
+# one worth naming separately: on a desktop it never applies, and in CI it is
+# the whole point — nothing is stored anywhere, the runner vouches for the job.
+PROVIDER_NAMES = {
+    "WorkloadIdentityCredentials": "workload identity federation — this "
+                                   "machine's CI or cloud provider vouches for "
+                                   "the run, and no key is stored anywhere",
+    "CredentialsFile": "an Anthropic profile on this machine, which the SDK "
+                       "refreshes itself",
+    "StaticToken": "a bearer token from the environment",
+}
+
+
 def profile() -> str | None:
-    """What the SDK's own resolution chain finds on disk, if anything.
+    """What the SDK's own resolution chain finds, if anything.
 
     Asked through the public entry point rather than by guessing at file
-    layouts, so an OAuth profile written by some future login tool is picked up
-    without a change here. Any failure means "nothing usable", which is the
+    layouts or environment variables, which means every path the SDK grows is
+    picked up without a change here: an OAuth profile written by some future
+    login tool, or the OIDC federation that a GitHub Actions or cloud runner
+    can do with no key at all. Any failure means "nothing usable", which is the
     only thing this answer is used for.
     """
     try:
@@ -128,8 +143,7 @@ def profile() -> str | None:
         return None
     if found is None:
         return None
-    name = type(getattr(found, "provider", found)).__name__
-    return name
+    return type(getattr(found, "provider", found)).__name__
 
 
 def resolve(root: Path | None = None) -> tuple[str, str | None]:
@@ -174,7 +188,10 @@ def status(root: Path | None = None) -> dict[str, Any]:
         out["detail"] = f"a key saved here{f' on {when}' if when else ''}"
         out["tail"] = tail(key or "")
     elif source == "profile":
-        out["detail"] = "an Anthropic profile on this machine, which the SDK refreshes itself"
+        found = profile() or ""
+        out["provider"] = found
+        out["detail"] = PROVIDER_NAMES.get(
+            found, "a credential the Anthropic SDK resolved for itself")
     elif source == ENV_BASE_URL:
         out["detail"] = f"{ENV_BASE_URL} — a gateway is expected to supply the credential"
     else:

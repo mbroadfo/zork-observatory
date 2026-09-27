@@ -26,9 +26,10 @@ from .notebook import Notebook
 from .trace import TraceWriter
 from .world.coverage import Coverage
 from .world.discovery import DiscoveryLedger, Turn as DiscoveryTurn
-from .world.frontier import structure as map_structure
+from .world.frontier import since_new_room, structure as map_structure
 from .world.graph import MapGraph, parse_movement
 from .world.outcomes import OutcomeTally
+from .world.recall import Exchange, Recall
 from .world.vocabulary import Vocabulary
 from .world.objects import build_tree, diff_objects, name_for
 
@@ -63,6 +64,16 @@ class SessionConfig:
     # exhaustion as an outcome would corrupt any time-to-discovery statistic.
     max_turns: int = 400
     max_cost_usd: float = 0.0    # 0 = no cost ceiling; the other budget that matters
+
+    # End a run that has stopped discovering. 0 leaves it off.
+    #
+    # The third budget, and the one the other two miss. A run can reach a state
+    # where it cannot die and cannot progress — above ground with no light
+    # source, say — and then walk into the same refusal until the turn budget
+    # runs out. Nothing is learned after the stall begins, but every turn of it
+    # is still paid for. Censored like the others: "had not found a new room in
+    # N turns" is an observation about the run, never a verdict on the player.
+    stall_limit: int = 0
 
     delay: float = 0.35          # seconds between turns, so a human can watch
     collect_valid_actions: bool = False   # expensive on Jericho; off by default
@@ -121,6 +132,7 @@ class Session:
         self.coverage = Coverage()
         self.vocabulary = Vocabulary()
         self.transcript: list[tuple[str, str]] = []
+        self.recall = Recall()
         self.checkpoints: dict[str, Checkpoint] = {}
 
         self.turn = 0
@@ -143,6 +155,11 @@ class Session:
         # Who has played, and from which turn. Empty for the ordinary case of
         # one player for one run.
         self.handoffs: list[dict[str, Any]] = []
+        # What players who have already handed over spent. Usage lives on the
+        # agent, so without this a handoff resets the run's cost to zero — and
+        # the readout, the trace and the cost ceiling all quietly understate
+        # what the run actually cost.
+        self._retired_usage: dict[str, Any] = {}
         # Where the current player's view of the transcript begins. Nonzero
         # only after a handoff that deliberately withheld its predecessor's
         # play; the observatory's own record is never trimmed.
@@ -231,6 +248,11 @@ class Session:
         await self._interrupt()
 
         previous = self.agent
+        # Bank what the outgoing player spent before the new one replaces it.
+        for key, value in previous.usage().items():
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                self._retired_usage[key] = self._retired_usage.get(key, 0) + value
+        self._retired_usage.pop("latency_ms_avg", None)
         self.agent = agent
         # Whatever the old player asked to write down, it never saw the reply.
         self._pending_journal = ""
@@ -293,6 +315,26 @@ class Session:
             notebook=self.notebook.summary() if self.notebook else None,
         )
         await agent.on_start(self.transcript[-1][1] if self.transcript else "")
+
+    def usage(self) -> dict[str, Any]:
+        """What this run has cost, across every player that has had it.
+
+        A handoff builds a new agent, and usage lives on the agent — so asking
+        the current player alone reports the cost of the last leg and calls it
+        the run. Anything summing money or tokens has to ask here.
+        """
+        total = dict(self._retired_usage)
+        for key, value in self.agent.usage().items():
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                total[key] = total.get(key, 0) + value
+            else:
+                total.setdefault(key, value)
+        calls = total.get("calls") or 1
+        if "latency_ms_total" in total:
+            total["latency_ms_avg"] = round(total["latency_ms_total"] / calls)
+        if "cost_usd" in total:
+            total["cost_usd"] = round(total["cost_usd"], 6)
+        return total
 
     async def _interrupt(self) -> None:
         """Stop the loop mid-turn and wait for it to actually be stopped.
@@ -482,6 +524,14 @@ class Session:
         self._pending_journal = ""
 
         self.transcript.append((command, obs.text))
+        # The same exchange, keyed by turn and place, for a player that wants to
+        # look further back than its window reaches. Append-only across a
+        # rollback, like the map: the world goes back, having read something
+        # does not un-happen.
+        self.recall.add(Exchange(
+            turn=self.turn, command=command, response=obs.text,
+            room=state.location_name,
+        ))
         self._prev_objects = list(state.objects)
         self._prev_room_id = room_id
         self._last_state = state
@@ -498,9 +548,19 @@ class Session:
             await self._finish("turn budget exhausted", censored=True)
             return False
         if self.config.max_cost_usd:
-            spent = self.agent.usage().get("cost_usd", 0.0)
+            # The run's cost, not the current player's. Asking the agent alone
+            # made a handoff reset the ceiling to zero, so a run could be
+            # handed from one expensive player to another and never reach a
+            # budget it had already spent twice over.
+            spent = self.usage().get("cost_usd", 0.0)
             if spent >= self.config.max_cost_usd:
                 await self._finish(f"cost budget exhausted (${spent:.2f})", censored=True)
+                return False
+        if self.config.stall_limit:
+            idle = since_new_room(self.map, self.turn)
+            if idle >= self.config.stall_limit:
+                await self._finish(
+                    f"stalled — nothing new in {idle} turns", censored=True)
                 return False
 
         self.turn += 1
@@ -522,6 +582,20 @@ class Session:
             self._emit("error", where="agent.act", message=f"{type(exc).__name__}: {exc}")
             await self._finish(f"agent error: {exc}")
             return False
+
+        # Before the thought: the lookups happened while it was deciding, and
+        # the transcript should read in the order things occurred.
+        for lookup in action.meta.get("searches") or []:
+            self._emit(
+                "agent.search",
+                turn=self.turn,
+                query=lookup.get("query", ""),
+                hits=lookup.get("hits", 0),
+                turns=lookup.get("turns", []),
+                # What it was allowed to look through, which after a cold
+                # handoff is less than the run.
+                of=len(self.recall) - self._agent_floor,
+            )
 
         if action.thought:
             self._emit("agent.thought", turn=self.turn, text=action.thought, meta=action.meta)
@@ -572,6 +646,17 @@ class Session:
             moves=self._last_state.moves if self._last_state else 0,
             # [-0:] is the whole list; a window of zero means no history.
             transcript=own[-self.config.history_turns:] if self.config.history_turns > 0 else [],
+            # The same boundary as the window: a player handed the room and
+            # nothing else must not be able to search for the rest either.
+            #
+            # Asked of the player rather than of a setting, so that a handoff
+            # to someone who can look things up brings the record with it, and
+            # a handoff to someone who cannot takes it away, with nothing to
+            # keep in sync.
+            recall=(
+                self.recall.since(self._agent_floor)
+                if getattr(self.agent, "search", False) else None
+            ),
             valid_actions=self.engine.valid_actions() if self.config.collect_valid_actions else None,
             life=self.life,
             lives_left=self.lives_left,
@@ -761,7 +846,7 @@ class Session:
                 reason=reason, censored=censored, turns=self.turn, steps=self.steps,
                 deaths=self.deaths, score=state.score if state else 0,
                 max_score=state.max_score if state else 0,
-                rooms=self.map.stats()["rooms"], usage=self.agent.usage(),
+                rooms=self.map.stats()["rooms"], usage=self.usage(),
                 trace=str(self.trace.path) if self.trace else None,
             )
         self._emit(
@@ -788,7 +873,7 @@ class Session:
             quality=self.outcomes.summary(),
             coverage=self.coverage.summary(),
             vocabulary=self.vocabulary.summary(),
-            usage=self.agent.usage(),
+            usage=self.usage(),
             notebook=self.notebook.summary() if self.notebook else None,
             series=self.series,
         )
@@ -886,7 +971,7 @@ class Session:
             "quality": self.outcomes.summary(),
             "coverage": self.coverage.summary(),
             "vocabulary": self.vocabulary.summary(),
-            "usage": self.agent.usage(),
+            "usage": self.usage(),
             "checkpoints": [
                 {
                     "id": c.id, "label": c.label, "turn": c.turn,

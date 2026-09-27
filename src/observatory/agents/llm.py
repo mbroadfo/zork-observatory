@@ -51,15 +51,32 @@ JOURNAL_FIELD: dict[str, Any] = {
 }
 
 
-def move_fields(journal: bool = False) -> dict[str, Any]:
-    """The reply schema, with the journal line when it is switched on."""
-    if not journal:
+# The lookup, when searching is switched on. Same reasoning as the journal
+# field: carried on the move rather than fetched through a tool-call path that
+# not every local server implements the same way. Unlike the journal, filling
+# it costs a second request — the results come back and the player is asked
+# again — so the description says what it is for rather than inviting it.
+SEARCH_FIELD: dict[str, Any] = {
+    "type": "string",
+    "description": "Optional. A word or phrase to look back for in everything "
+                   "typed and printed so far. Fill this in and leave `command` "
+                   "empty; you will be shown what matched and asked again.",
+}
+
+
+def move_fields(journal: bool = False, search: bool = False) -> dict[str, Any]:
+    """The reply schema, with whichever optional fields are switched on."""
+    extra: dict[str, Any] = {}
+    if journal:
+        extra["journal"] = JOURNAL_FIELD
+    if search:
+        extra["search"] = SEARCH_FIELD
+    if not extra:
         return MOVE_FIELDS
-    schema = {
+    return {
         **MOVE_FIELDS,
-        "properties": {**MOVE_FIELDS["properties"], "journal": JOURNAL_FIELD},
+        "properties": {**MOVE_FIELDS["properties"], **extra},
     }
-    return schema
 
 # A command is one line typed at a prompt. Anything longer is a model talking,
 # and the interpreter would only choke on it.
@@ -117,6 +134,27 @@ def turn_prompt(
     else:
         lines.append(ctx.observation.strip())
     lines.append(f"\n[Turn {ctx.turn}. Score {ctx.score}. Moves {ctx.moves}.]")
+    lines.append("What is your next command?")
+    return "\n".join(lines)
+
+
+def search_reply(results: str, ctx: TurnContext, searches_left: int) -> str:
+    """What comes back when a player looks something up, and the question again.
+
+    Appended to the same turn's prompt rather than sent as a fresh one, so the
+    player answers with its lookup and the window both in view. Saying how many
+    lookups remain is not a nudge to use them — it is what stops a player
+    spending its last one and being cut off mid-thought without knowing why.
+    """
+    lines = ["", results, ""]
+    if searches_left > 0:
+        lines.append(
+            f"You may look back {searches_left} more time"
+            f"{'' if searches_left == 1 else 's'} this turn, or answer now."
+        )
+    else:
+        lines.append("That was the last lookup available this turn.")
+    lines.append(f"[Turn {ctx.turn}. Score {ctx.score}. Moves {ctx.moves}.]")
     lines.append("What is your next command?")
     return "\n".join(lines)
 
