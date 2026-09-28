@@ -207,6 +207,18 @@ async def _play_once(args: argparse.Namespace, notebook_mode: str, series: dict[
     return 0
 
 
+def _mcp(args: argparse.Namespace) -> int:
+    """Speak MCP on stdin/stdout for as long as the client keeps the pipe open.
+
+    Nothing is printed to stdout that is not a protocol message — a stray line
+    here corrupts the stream — so diagnostics go to stderr or nowhere.
+    """
+    from .mcp_server import DEFAULT_BASE, serve
+
+    serve(args.url or DEFAULT_BASE)
+    return 0
+
+
 def _replay(args: argparse.Namespace) -> int:
     path = Path(args.path)
     if not path.exists():
@@ -268,6 +280,14 @@ def main(argv: list[str] | None = None) -> int:
     r = sub.add_parser("replay", help="print a recorded trace")
     r.add_argument("path")
     r.set_defaults(fn=lambda a: _replay(a))
+
+    m = sub.add_parser(
+        "mcp",
+        help="serve the live run as MCP tools, for an assistant to advise you",
+    )
+    m.add_argument("--url", default=None,
+                   help="the running observatory (default http://127.0.0.1:8000)")
+    m.set_defaults(fn=lambda a: _mcp(a))
 
     args = parser.parse_args(argv)
     return args.fn(args)

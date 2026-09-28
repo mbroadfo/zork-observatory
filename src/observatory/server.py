@@ -335,6 +335,51 @@ async def credentials_forget() -> JSONResponse:
     return JSONResponse({"ok": True, "detail": result["detail"], **credentials.status(ASSET_ROOT)})
 
 
+@app.get("/api/transcript")
+async def transcript() -> JSONResponse:
+    """Everything typed and printed this run, with turns and rooms.
+
+    The same record the player can search, served whole for anything reading
+    from outside — the MCP tools, or a notebook. Read-only and derived; the
+    session is the only thing that writes it.
+    """
+    session = hub.session
+    if session is None:
+        return JSONResponse({"exchanges": []})
+    return JSONResponse({"exchanges": [
+        {"turn": e.turn, "command": e.command, "response": e.response, "room": e.room}
+        for e in session.recall.exchanges
+    ]})
+
+
+@app.get("/api/transcript/search")
+async def transcript_search(q: str = "", limit: int = 8) -> JSONResponse:
+    """Turns mentioning a word, rendered the way a player would be shown them."""
+    session = hub.session
+    if session is None:
+        return JSONResponse({"rendered": "", "hits": []})
+    hits = session.recall.search(q, limit=max(1, min(limit, 40)))
+    return JSONResponse({
+        "rendered": session.recall.render(q, hits),
+        "hits": [{"turn": h.exchange.turn, "room": h.exchange.room,
+                  "command": h.exchange.command, "matched": h.matched} for h in hits],
+    })
+
+
+@app.get("/api/transcript/room")
+async def transcript_room(name: str = "") -> JSONResponse:
+    """What has been tried in one room. Defaults to where the player stands."""
+    session = hub.session
+    if session is None:
+        return JSONResponse({"room": "", "exchanges": []})
+    wanted = (name or (session._last_state.location_name if session._last_state else "")).strip()
+    rows = [e for e in session.recall.exchanges
+            if e.room.lower() == wanted.lower() and e.command]
+    return JSONResponse({"room": wanted, "exchanges": [
+        {"turn": e.turn, "command": e.command, "response": e.response} for e in rows
+    ]})
+
+
 @app.get("/api/atlas")
 async def atlas(story: str = "") -> JSONResponse:
     """The scanned map for this exact story build, if one is installed.

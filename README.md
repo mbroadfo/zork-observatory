@@ -729,6 +729,50 @@ inside the player's `act`, before anything reaches the engine — a human who ha
 not typed yet, or a model call nobody will read now — so cancelling there costs
 an inference and no world state.
 
+### Asking for advice: the observatory as MCP tools
+
+The division of labour this is built for:
+
+- **A local model plays.** Free per token, and the genuinely hard case — it has
+  not memorised the game, so what it does is reasoning rather than recall.
+- **A person gets it unstuck.** ⇄ Hand over to `human`, fix the position, hand
+  it back. The trace records exactly who played which turns.
+- **A hosted model advises the person.** Interactive, attended, and the only
+  part that needs a subscription.
+
+`observatory mcp` serves the live run as MCP tools over stdio, so an assistant
+can read the run while you decide what to type:
+
+```bash
+claude mcp add zork -- /path/to/.venv/bin/observatory mcp
+# Windows: ...\.venv\Scripts\observatory.exe mcp
+```
+
+Then ask things like *"my agent has been in the same four rooms for sixty turns
+— what class of failure is that?"* and it reads the actual run:
+
+| tool | answers |
+| --- | --- |
+| `position` | turn, score, room, inventory, who is playing, whether it has changed hands |
+| `stuck_report` | turns since anything new, revisit ratio, wasted and futile turns, walls never retried |
+| `recent` | the last N exchanges as the player saw them |
+| `search_transcript` | every turn mentioning a word, however far back, verbatim |
+| `what_was_tried` | commands issued in one room and what the game replied |
+| `map_shape` | depth, components, reachable rooms, coverage against the engine's own count |
+| `what_it_remembers` | lessons kept across deaths, and the journal lines the world bore out |
+
+**There is deliberately no hint tool and no walkthrough tool**, and a test
+enforces their absence. A frontier model has read Zork — a tool that returned
+solutions would make advice indistinguishable from recall and destroy the thing
+being measured. Every tool reports the *run's behaviour*; none reports the
+game's answers. "What is my agent failing at" is a question about the agent;
+"how do I open the grating" is a question about Zork, and the internet has it.
+
+The tools are read-only and the server is a separate process that talks to the
+observatory over HTTP, so nothing here can disturb a live run or type a command
+for you. It also cannot reach the engine's ground truth — no valid-action list,
+no object tree — the same line the agent sits behind.
+
 ### Rewinding doesn't erase knowledge
 
 `Session.rewind()` restores the world to a checkpoint but leaves the map intact.
@@ -760,7 +804,7 @@ observatory replay traces/run.jsonl     # terminal
 src/observatory/
   engine/       backends: jericho (real games) · mock (tests, no ROM)
   world/        map graph built from observed transitions · frontier.py (its shape)
-                · object-tree diffing
+                · object-tree diffing · recall.py (everything typed and printed)
   agents/       random · scripted · human · claude · ollama · llm.py (what every model is shown)
                 · memory.py (the lessons an agent keeps at a death)
                 · journal.py (what it writes down as it plays)
@@ -769,6 +813,8 @@ src/observatory/
   events.py     the event bus
   trace.py      JSONL read/write
   assets.py     what this project cannot ship, and where it legitimately lives
+  credentials.py where the Claude player's key comes from, and what never leaks
+  mcp_server.py the live run as MCP tools, for advice — no hints, by design
   server.py     FastAPI + WebSocket
   web/          the front end · atlas.js (the chart) · atlas/ (room boxes)
 tools/
