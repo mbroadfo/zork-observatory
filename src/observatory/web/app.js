@@ -739,6 +739,9 @@ function renderSnapshot(p) {
 
   $("r-score").textContent = p.max_score ? `${p.score} / ${p.max_score}` : p.score;
   $("r-gauge").style.width = p.max_score ? `${(p.score / p.max_score) * 100}%` : "0%";
+  // A rollback moves the world without a command being typed, so turn.begin
+  // never fires and this is the only thing that corrects the counter.
+  if (p.turn !== undefined && p.turn !== null) $("r-turn").textContent = p.turn;
 }
 
 function renderDelta(changes) {

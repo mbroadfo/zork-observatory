@@ -433,6 +433,15 @@ class Session:
                 ],
             )
 
+        # Ground covered. Reuses the same visibility set as everything else so
+        # the panels never disagree about what the agent could see — and done
+        # BEFORE the snapshot that carries it. Updating afterwards shipped the
+        # previous turn's coverage with this turn's score, so the header and
+        # the coverage panel disagreed on screen by exactly one turn.
+        self.coverage.observe(
+            state, visible, probe.player_object(), command=command, text=obs.text
+        )
+
         self._emit(
             "state.snapshot",
             location_id=state.location_id,
@@ -455,6 +464,9 @@ class Session:
             seen_objects=sorted(self.coverage.objects_seen),
             opened_containers=sorted(self.coverage.opened),
             vocabulary=self.vocabulary.summary(),
+            # Carried so that a snapshot outside the ordinary flow of a turn —
+            # after a rollback — can correct the turn counter too.
+            turn=self.turn,
         )
 
         if any(delta.values()):
@@ -469,12 +481,6 @@ class Session:
                 structure=map_structure(self.map, self.turn, room_id),
                 **{k: v for k, v in delta.items() if v},
             )
-
-        # Ground covered. Reuses the same visibility set as everything else so
-        # the panels never disagree about what the agent could see.
-        self.coverage.observe(
-            state, visible, probe.player_object(), command=command, text=obs.text
-        )
 
         # What the agent has worked out about the shape of the world, judged by
         # what it did rather than what it claimed.
@@ -797,6 +803,37 @@ class Session:
         self._prev_objects = list(state.objects)
         self._prev_room_id = MapGraph.room_id(state.location_id, state.location_name)
         self._last_state = state
+        self._emit_snapshot(state)
+
+    def _emit_snapshot(self, state: WorldState) -> None:
+        """Say where the world is now, outside the ordinary flow of a turn.
+
+        A rollback moves the score, the room and the inventory without a
+        command having been typed, so nothing else would announce it. Without
+        this the readouts kept showing the dead run's numbers — after a death
+        at turn 270 the header still read turn 270 and 133 points while the
+        engine was back at turn 162 with 104, which is the kind of quiet
+        disagreement that makes a watcher distrust every other panel.
+        """
+        self._emit(
+            "state.snapshot",
+            location_id=state.location_id,
+            location_name=state.location_name,
+            room_id=MapGraph.room_id(state.location_id, state.location_name),
+            inventory=state.inventory,
+            state_hash=state.state_hash,
+            score=state.score,
+            moves=state.moves,
+            max_score=state.max_score,
+            dark=state.dark,
+            object_count=len(state.objects),
+            tree=build_tree(state.objects),
+            coverage=self.coverage.summary(),
+            seen_objects=sorted(self.coverage.objects_seen),
+            opened_containers=sorted(self.coverage.opened),
+            vocabulary=self.vocabulary.summary(),
+            turn=self.turn,
+        )
 
     async def run(self) -> None:
         """Run until the game ends, the turn budget runs out, or someone pauses."""

@@ -26,6 +26,59 @@ def types_of(events) -> list[str]:
     return [e.type for e in events]
 
 
+class TestTheDisplayNeverLags:
+    """Two panels disagreeing on one screen erodes trust in all the others.
+
+    Both of these were found by watching a live run on 2026-09-28: a rollback
+    left the readouts showing the dead run's turn and score, and the coverage
+    panel was permanently one turn behind the header."""
+
+    async def test_coverage_ships_with_the_turn_it_describes(self):
+        """`coverage` rides on the snapshot. Observing after emitting sent the
+        previous turn's figures with this turn's score, so the header read 93
+        while the coverage panel read 89.
+
+        Played as far as the turn that first scores, because before that both
+        numbers are zero and agree for the wrong reason — the first version of
+        this test stopped at turn 4 and would have passed with the bug in."""
+        session, _, seen = make_session(max_turns=40)
+        await session.start()
+        while session._last_state.score == 0 and session.turn < 30:
+            await session.step_once()
+
+        last = [e for e in seen if e.type == "state.snapshot"][-1].payload
+        assert last["score"] > 0, "never reached a scoring turn"
+        assert last["coverage"]["score"] == last["score"]
+
+    async def test_a_rollback_announces_where_the_world_landed(self):
+        """Nothing else does: no command was typed, so `turn.begin` never
+        fires and every readout keeps the numbers from before the restore."""
+        session, _, seen = make_session()
+        await session.start()
+        for _ in range(4):
+            await session.step_once()
+        target = session.checkpoint("before")
+        for _ in range(3):
+            await session.step_once()
+
+        seen.clear()
+        assert session.rewind(target.id) is True
+
+        snapshot = next(e for e in seen if e.type == "state.snapshot")
+        assert snapshot.payload["turn"] == target.turn == session.turn
+        assert snapshot.payload["score"] == session._last_state.score
+        assert snapshot.payload["inventory"] == session._last_state.inventory
+
+    async def test_every_snapshot_carries_the_turn(self):
+        """The front end corrects its counter from this, so a snapshot without
+        one silently does nothing."""
+        session, _, seen = make_session()
+        await session.start()
+        await session.step_once()
+        for event in [e for e in seen if e.type == "state.snapshot"]:
+            assert "turn" in event.payload
+
+
 class TestSessionLoop:
     async def test_walkthrough_wins_and_reports_it(self):
         session, _, seen = make_session(max_turns=40)
