@@ -202,7 +202,16 @@ def map_shape(obs: Observatory, **_: Any) -> str:
 
 
 def what_it_remembers(obs: Observatory, **_: Any) -> str:
-    """The lessons and journal lines the player is carrying."""
+    """The lessons and journal lines the player is carrying.
+
+    Carried lines are reported apart from earned ones, and said to be from
+    other runs, because they are — a journal can be seeded from a walkthrough
+    or inherited through a notebook, and most of what a player is holding is
+    usually not its own work. Listing them together under "the world bore this
+    out" reads as a run that believes things that never happened in it, which
+    is a different and much more alarming bug than the one in front of you.
+    The agent is shown the same split, in Journal.render().
+    """
     s = obs.session()
     if not s:
         return _no_session()
@@ -211,14 +220,35 @@ def what_it_remembers(obs: Observatory, **_: Any) -> str:
     out.append(f"Lessons kept across deaths ({len(memory)}):")
     for m in memory:
         out.append(f'  [turn {m.get("turn")}, {m.get("kind")}] {m.get("text")}')
+    if not memory:
+        out.append("  none — it has not died, or it kept nothing")
+
     journal = s.get("journal") or []
-    out.append(f"Journal lines the world bore out ({len(journal)}):")
-    for j in journal[-12:]:
-        out.append(f'  [turn {j.get("turn")}] {j.get("text")}')
     summary = s.get("journal_summary") or {}
+    carried = int(summary.get("carried") or 0)
+    inherited, earned = journal[:carried], journal[carried:]
+
+    out.append("")
+    if inherited:
+        out.append(
+            f"Handed to it before this run began ({len(inherited)}) — from a "
+            "seeded journal or an earlier run through the notebook. The world "
+            "has started over since, so NONE of this is established in the "
+            "run you are looking at:")
+        for j in inherited[:14]:
+            out.append(f'  [run {j.get("run")}, turn {j.get("turn")}] {j.get("text")}')
+        if len(inherited) > 14:
+            out.append(f"  … and {len(inherited) - 14} more")
+    out.append("")
+    out.append(f"Written this run, and borne out by the game ({len(earned)}):")
+    for j in earned:
+        out.append(f'  [turn {j.get("turn")}] {j.get("text")}')
+    if not earned:
+        out.append("  nothing yet")
     if summary:
-        out.append(f"Of {summary.get('attempted', 0)} lines it offered,"
-                   f" {summary.get('kept', 0)} were kept.")
+        out.append(f"It offered {summary.get('attempted', 0)} lines this run and "
+                   f"{summary.get('kept', 0)} were kept; the rest were rejected "
+                   "because the turn changed nothing the player could see.")
     return "\n".join(out)
 
 

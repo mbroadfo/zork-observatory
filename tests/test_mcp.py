@@ -206,6 +206,43 @@ class TestWhatTheToolsReport:
         assert "The window opens" in text
         assert "1 were kept" in text
 
+    def test_carried_journal_lines_are_not_called_established(self):
+        """The defect an adviser found on 2026-09-28, using these very tools.
+
+        A journal can be seeded from a walkthrough and inherited through a
+        notebook, so most of what a player holds is usually not its own work.
+        Listing all 24 lines under "the world bore this out" read as a run
+        acting on things that had never happened in it — a far more alarming
+        bug than the real one, which was this label."""
+        session = dict(SESSION)
+        session["journal"] = [
+            {"run": 0, "turn": 16, "text": "The brass lantern is now on."},
+            {"run": 0, "turn": 23, "text": "The rug is moved to one side."},
+            {"run": 2, "turn": 40, "text": "The window opens with great effort."},
+        ]
+        session["journal_summary"] = {"attempted": 17, "kept": 1, "carried": 2}
+        text = call(Fake(session=session), "what_it_remembers")
+
+        before, after = text.split("Written this run", 1)
+        assert "brass lantern" in before and "rug is moved" in before
+        assert "NONE of this is established" in before
+        # The one line it actually earned is on the other side of the split.
+        assert "window opens" in after
+        assert "brass lantern" not in after
+
+    def test_a_journal_that_is_entirely_inherited_says_it_earned_nothing(self):
+        session = dict(SESSION)
+        session["journal"] = [{"run": 0, "turn": 1, "text": "Handed down."}]
+        session["journal_summary"] = {"attempted": 9, "kept": 0, "carried": 1}
+        text = call(Fake(session=session), "what_it_remembers")
+        assert "nothing yet" in text
+
+    def test_no_journal_at_all_is_not_an_error(self):
+        session = dict(SESSION)
+        session["journal"] = []
+        session["journal_summary"] = {}
+        assert "nothing yet" in call(Fake(session=session), "what_it_remembers")
+
     def test_every_tool_copes_with_no_live_run(self):
         empty = Fake(session=None)
         for name in TOOLS:
