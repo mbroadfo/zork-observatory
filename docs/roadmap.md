@@ -128,8 +128,11 @@ beat aggregate ratios.
 
 Primary, for any arm:
 
-- **Turn of first entry indoors** (game-specific but the single cleanest signal
-  on Zork).
+- **Step at which the score first moved** (`scoring` in the discovery ledger).
+  Confirmed 30 September against the sweep's traces: it reproduces the
+  hand-derived "enters house" turn for every arm — 18, 80, 124, 190, 206, 239,
+  317, and never for `episodic` — because on Zork the points are indoors. The
+  sweep's cleanest signal, without a room name only one game has.
 - **Takes** — objects actually acquired, not examined.
 - **Discovery ledger timings** (`world/discovery.py`) — the turn each realisation
   becomes observable in behaviour. Works on a run that scores zero, and is

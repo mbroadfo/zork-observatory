@@ -22,7 +22,14 @@ CTX="${CTX:-8192}"
 OUT="traces/sweep"
 LOG="$OUT/sweep.log"
 
-COMMON="--engine jericho --rom roms/zork1.z5 --turns $TURNS --lives $LIVES --seed $SEED"
+# One roll of the dice per arm was the September sweep's own stated weakness:
+# a single 350-turn run is an anecdote with good instrumentation. SEEDS plays
+# each arm once per seed and tools/baseline.py reads them back as a spread.
+# The default is still one, because a full ladder at three seeds is a day of
+# GPU and most questions do not need one.
+SEEDS="${SEEDS:-$SEED}"
+
+COMMON="--engine jericho --rom roms/zork1.z5 --turns $TURNS --lives $LIVES"
 # Thinking off, deliberately. Left to its own default qwen3:14b spends 1.5k-7k
 # characters of it per turn and a turn takes 30s instead of 3s; the same ladder
 # with thinking on is its own sweep, not a row in this one.
@@ -60,17 +67,23 @@ for arm in "${ARMS[@]}"; do
   name="${arm%%|*}"
   args="${arm#*|}"
   if [ ${#wanted[@]} -gt 0 ] && [[ ! " ${wanted[*]} " =~ " ${name} " ]]; then continue; fi
-  trace="$OUT/$name.jsonl"
-  if [ -s "$trace" ]; then
-    echo "[$(date +%H:%M:%S)] $name already has a trace, skipping" | tee -a "$LOG"
-    continue
-  fi
-  echo "[$(date +%H:%M:%S)] === $name === $args" | tee -a "$LOG"
-  started=$(date +%s)
-  docker exec "$CONTAINER" observatory play $COMMON $args --trace "$trace" \
-    >> "$OUT/$name.out" 2>&1
-  code=$?
-  echo "[$(date +%H:%M:%S)] $name finished in $(( ($(date +%s) - started) / 60 ))m (exit $code)" | tee -a "$LOG"
+
+  for seed in $SEEDS; do
+    # The single-seed name is kept as it was so the September traces are still
+    # found where the write-up says they are.
+    if [ "$SEEDS" = "$SEED" ]; then run="$name"; else run="$name-s$seed"; fi
+    trace="$OUT/$run.jsonl"
+    if [ -s "$trace" ]; then
+      echo "[$(date +%H:%M:%S)] $run already has a trace, skipping" | tee -a "$LOG"
+      continue
+    fi
+    echo "[$(date +%H:%M:%S)] === $run === $args" | tee -a "$LOG"
+    started=$(date +%s)
+    docker exec "$CONTAINER" observatory play $COMMON --seed "$seed" $args --trace "$trace" \
+      >> "$OUT/$run.out" 2>&1
+    code=$?
+    echo "[$(date +%H:%M:%S)] $run finished in $(( ($(date +%s) - started) / 60 ))m (exit $code)" | tee -a "$LOG"
+  done
 done
 
 echo "[$(date +%H:%M:%S)] sweep done" | tee -a "$LOG"
