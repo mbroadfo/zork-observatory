@@ -60,7 +60,16 @@ services:
   #   docker compose exec ollama ollama pull qwen3:8b
   # Weights live in a named volume, so they survive rebuilds.
   ollama:
-    image: ollama/ollama:0.13.5
+    # Pinned to an exact version, never `latest`. Every arm on the roadmap is
+    # compared against a baseline measured on one inference engine, and a tag
+    # that moves under a rebuild would invalidate that comparison without
+    # anyone noticing. Changing this line is changing the experiment: the
+    # baseline has to be re-measured, and the version it was measured on
+    # belongs in the write-up.
+    #
+    # 0.13.5 -> 0.35.0 on 1 October 2026, to share one daemon with ai-arcade,
+    # which needs the /v1/systemone endpoint that 0.35 introduced.
+    image: ollama/ollama:0.35.0
     ports:
       - "11434:11434"
     volumes:
